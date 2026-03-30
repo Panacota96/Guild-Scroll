@@ -10,8 +10,6 @@ from pathlib import Path
 def build_script_command(
     raw_io_path: Path,
     timing_path: Path,
-    zdotdir: Path,
-    hook_events_path: Path,
 ) -> list[str]:
     """
     Return the argv list for the `script` invocation.
@@ -35,8 +33,7 @@ def build_script_command(
             "--log-timing", str(timing_path),
             "--logging-format", "advanced",
             "--quiet",
-            "--command", _zsh_command(zdotdir, hook_events_path),
-            "/dev/null",
+            "--command", "zsh",
         ]
     else:
         # Fallback: script -f (flush) -q, timing via -t
@@ -45,20 +42,10 @@ def build_script_command(
             "-f",
             "-q",
             "-t", str(timing_path),
-            "--command", _zsh_command(zdotdir, hook_events_path),
+            "--command", "zsh",
             str(raw_io_path),
         ]
     return cmd
-
-
-def _zsh_command(zdotdir: Path, hook_events_path: Path) -> str:
-    """Build the shell command string to pass to script --command."""
-    env_pairs = (
-        f"ZDOTDIR={zdotdir} "
-        f"GUILD_SCROLL_REAL_HOME={Path.home()} "
-        f"GUILD_SCROLL_HOOK_FILE={hook_events_path} "
-    )
-    return f"{env_pairs}zsh"
 
 
 def start_recording(
@@ -71,7 +58,7 @@ def start_recording(
     Launch the script session. Blocks until the user exits.
     Returns the exit code of the inner zsh process.
     """
-    cmd = build_script_command(raw_io_path, timing_path, zdotdir, hook_events_path)
+    cmd = build_script_command(raw_io_path, timing_path)
 
     # Build env with ZDOTDIR and guild-scroll vars for the outer script process
     env = os.environ.copy()

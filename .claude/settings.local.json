@@ -7,7 +7,15 @@
       "Bash(python3 -c \"import pexpect; print\\(pexpect.__version__\\)\" 2>&1)",
       "Bash(which zsh:*)",
       "Bash(which script:*)",
-      "Bash(python3 --version && python3 -c \"import click; print\\('click', click.__version__\\)\" 2>&1)"
+      "Bash(python3 --version && python3 -c \"import click; print\\('click', click.__version__\\)\" 2>&1)",
+      "Bash(which dpkg:*)",
+      "Bash(apt list:*)",
+      "Bash(apt-cache show:*)",
+      "Bash(dpkg -L gobuster 2>/dev/null | head -20)",
+      "Bash(dpkg -L feroxbuster 2>/dev/null | head -20)",
+      "Bash(apt-cache showsrc:*)",
+      "Read(//etc/apt/**)",
+      "Read(//etc/apt/sources.list.d/**)"
     ]
   }
 }
