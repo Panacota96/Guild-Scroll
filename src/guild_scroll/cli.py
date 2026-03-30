@@ -1,5 +1,5 @@
 """
-Click CLI: gscroll start | list | status
+Click CLI: gscroll start | list | status | update
 """
 import sys
 import click
@@ -60,3 +60,30 @@ def status():
     click.echo(f"Active session: {info.get('session_name')}")
     click.echo(f"  Started : {info.get('start_time')}")
     click.echo(f"  Commands: {info.get('command_count', 0)}")
+
+
+@cli.command()
+def update():
+    """Check for updates and install the latest version."""
+    from guild_scroll.updater import fetch_remote_version, is_newer, run_update
+
+    click.echo(f"Current version: {__version__}")
+    click.echo("Checking for updates...")
+    try:
+        remote_version = fetch_remote_version()
+    except Exception as exc:
+        click.echo(f"Error checking for updates: {exc}", err=True)
+        sys.exit(1)
+
+    if not is_newer(remote_version, __version__):
+        click.echo(f"Already up to date (v{__version__}).")
+        return
+
+    click.echo(f"New version available: {remote_version} (current: {__version__})")
+    click.echo("Installing update...")
+    success, message = run_update()
+    if success:
+        click.echo(f"Updated to v{remote_version}. Restart gscroll to use the new version.")
+    else:
+        click.echo(f"Update failed: {message}", err=True)
+        sys.exit(1)

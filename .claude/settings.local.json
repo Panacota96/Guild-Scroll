@@ -15,7 +15,8 @@
       "Bash(dpkg -L feroxbuster 2>/dev/null | head -20)",
       "Bash(apt-cache showsrc:*)",
       "Read(//etc/apt/**)",
-      "Read(//etc/apt/sources.list.d/**)"
+      "Read(//etc/apt/sources.list.d/**)",
+      "Bash(gh api:*)"
     ]
   }
 }

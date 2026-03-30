@@ -81,3 +81,46 @@ class TestVersionFlag:
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
         assert "0.1.0" in result.output
+
+
+class TestUpdateCommand:
+    def test_already_up_to_date(self):
+        runner = CliRunner()
+        with patch("guild_scroll.updater.fetch_remote_version", return_value="0.1.0"), \
+             patch("guild_scroll.updater.is_newer", return_value=False):
+            result = runner.invoke(cli, ["update"])
+        assert result.exit_code == 0
+        assert "Already up to date" in result.output
+
+    def test_update_available_and_succeeds(self):
+        runner = CliRunner()
+        with patch("guild_scroll.updater.fetch_remote_version", return_value="0.2.0"), \
+             patch("guild_scroll.updater.is_newer", return_value=True), \
+             patch("guild_scroll.updater.run_update", return_value=(True, "ok")):
+            result = runner.invoke(cli, ["update"])
+        assert result.exit_code == 0
+        assert "Updated to v0.2.0" in result.output
+
+    def test_update_available_but_fails(self):
+        runner = CliRunner()
+        with patch("guild_scroll.updater.fetch_remote_version", return_value="0.2.0"), \
+             patch("guild_scroll.updater.is_newer", return_value=True), \
+             patch("guild_scroll.updater.run_update", return_value=(False, "pip error")):
+            result = runner.invoke(cli, ["update"])
+        assert result.exit_code == 1
+        assert "Update failed" in result.output
+
+    def test_network_error(self):
+        runner = CliRunner()
+        with patch("guild_scroll.updater.fetch_remote_version",
+                   side_effect=RuntimeError("Network error")):
+            result = runner.invoke(cli, ["update"])
+        assert result.exit_code == 1
+        assert "Error checking for updates" in result.output
+
+    def test_shows_current_version(self):
+        runner = CliRunner()
+        with patch("guild_scroll.updater.fetch_remote_version", return_value="0.1.0"), \
+             patch("guild_scroll.updater.is_newer", return_value=False):
+            result = runner.invoke(cli, ["update"])
+        assert "Current version:" in result.output
