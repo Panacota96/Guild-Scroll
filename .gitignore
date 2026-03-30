@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Guild Scroll runtime
+sessions/*/
+!sessions/.gitkeep
+
+# Temp ZDOTDIR dirs
+/tmp/guild_scroll_zdotdir_*/

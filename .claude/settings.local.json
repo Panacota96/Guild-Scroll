@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(python3 -c \"import pty; help\\(pty\\)\" 2>&1 | head -60)",
+      "Bash(python3 -c \"import pexpect; print\\(pexpect.__version__\\)\" 2>&1)",
+      "Bash(which zsh:*)",
+      "Bash(which script:*)",
+      "Bash(python3 --version && python3 -c \"import click; print\\('click', click.__version__\\)\" 2>&1)"
+    ]
+  }
+}
