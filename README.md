@@ -1,8 +1,25 @@
 # Guild Scroll
 
+![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
+![Version](https://img.shields.io/badge/version-0.1.0-green)
+![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
+
 > Terminal session recorder for CTF competitions and authorized penetration testing.
 
 Guild Scroll wraps your terminal with `script`/zsh hooks to capture every command, output, and downloaded asset into structured JSONL logs — so you can replay, export, and report on your sessions without manual note-taking.
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+- [Session Format](#session-format)
+- [Roadmap](#roadmap)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
 ---
 
