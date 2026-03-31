@@ -90,10 +90,11 @@ def update():
 
 
 @cli.command()
-@click.argument("session_name", required=False, default=None)
 @click.argument("text")
+@click.option("-s", "--session", "session_name", default=None,
+              help="Session name (auto-detected inside a recording).")
 @click.option("--tag", "tags", multiple=True, help="Tag(s) for this note.")
-def note(session_name, text, tags):
+def note(text, session_name, tags):
     """Add an annotation note to a session.
 
     SESSION_NAME is optional; if omitted, uses GUILD_SCROLL_SESSION env var.
@@ -123,7 +124,7 @@ def note(session_name, text, tags):
 
 
 @cli.command()
-@click.argument("session_name")
+@click.argument("session_name", required=False, default=None)
 @click.option(
     "--format", "fmt",
     type=click.Choice(["md", "html", "cast"], case_sensitive=False),
@@ -134,19 +135,21 @@ def note(session_name, text, tags):
 def export(session_name, fmt, output_path):
     """Export a recorded session to markdown, HTML, or asciicast format."""
     from pathlib import Path
-    from guild_scroll.session_loader import load_session
+    from guild_scroll.session_loader import load_session, resolve_session
 
     try:
-        session = load_session(session_name)
+        sess_dir = resolve_session(session_name)
+        session = load_session(sess_dir.name)
     except FileNotFoundError as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
+    actual_name = sess_dir.name
     ext_map = {"md": ".md", "html": ".html", "cast": ".cast"}
     if output_path:
         out = Path(output_path)
     else:
-        out = Path(f"{session_name}{ext_map[fmt]}")
+        out = Path(f"{actual_name}{ext_map[fmt]}")
 
     if fmt == "md":
         from guild_scroll.exporters.markdown import export_markdown
@@ -162,7 +165,40 @@ def export(session_name, fmt, output_path):
 
 
 @cli.command()
-@click.argument("session_name")
+@click.argument("session_name", required=False, default=None)
+@click.option("--tool", default=None, help="Filter by tool/binary name.")
+@click.option("--phase", default=None, type=click.Choice(["recon", "exploit", "post-exploit", "unknown"]), help="Filter by phase.")
+@click.option("--exit-code", "exit_code", default=None, type=int, help="Filter by exit code.")
+@click.option("--cwd", default=None, help="Filter by working directory (substring match).")
+def search(session_name, tool, phase, exit_code, cwd):
+    """Search commands in a session with filters."""
+    from guild_scroll.session_loader import load_session, resolve_session
+    from guild_scroll.search import SearchFilter, search_commands
+
+    try:
+        sess_dir = resolve_session(session_name)
+        session = load_session(sess_dir.name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    filters = SearchFilter(tool=tool, phase=phase, exit_code=exit_code, cwd=cwd)
+    results = search_commands(session, filters)
+
+    if not results:
+        click.echo("No matching commands found.")
+        return
+
+    click.echo(f"{'#':<4} {'PHASE':<14} {'EXIT':<5} {'COMMAND'}")
+    click.echo("-" * 70)
+    from guild_scroll.tool_tagger import tag_command
+    for cmd in results:
+        phase_tag = tag_command(cmd.command) or "unknown"
+        click.echo(f"{cmd.seq:<4} {phase_tag:<14} {cmd.exit_code:<5} {cmd.command[:45]}")
+
+
+@cli.command()
+@click.argument("session_name", required=False, default=None)
 @click.option("--speed", default=1.0, show_default=True, help="Playback speed multiplier.")
 def replay(session_name, speed):
     """Replay a recorded terminal session via scriptreplay."""
@@ -190,5 +226,38 @@ def replay(session_name, speed):
         divisor = 1.0 / speed
         cmd += ["-d", str(divisor)]
 
-    result = subprocess.run(cmd)
-    sys.exit(result.returncode)
+    returncode = 0
+    try:
+        result = subprocess.run(cmd)
+        returncode = result.returncode
+    except KeyboardInterrupt:
+        returncode = 130
+    finally:
+        # Restore terminal to a sane state — scriptreplay can leave it broken
+        subprocess.run(["stty", "sane"], stderr=subprocess.DEVNULL)
+
+    sys.exit(returncode)
+
+
+@cli.command()
+@click.argument("session_name", required=False, default=None)
+def tui(session_name):
+    """Launch the interactive TUI dashboard for a session."""
+    from guild_scroll.session_loader import resolve_session
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    try:
+        from guild_scroll.tui.app import GuildScrollApp
+    except ImportError:
+        click.echo(
+            "Error: Textual is not installed. Install it with: pip install 'guild-scroll[tui]'",
+            err=True,
+        )
+        sys.exit(1)
+
+    app = GuildScrollApp(sess_dir.name)
+    app.run()

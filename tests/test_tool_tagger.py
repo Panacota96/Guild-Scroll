@@ -1,6 +1,6 @@
 """Tests for tool_tagger module."""
 import pytest
-from guild_scroll.tool_tagger import tag_command
+from guild_scroll.tool_tagger import tag_command, classify_command, ToolClassification
 
 
 @pytest.mark.parametrize("command,expected", [
@@ -38,3 +38,28 @@ def test_empty_string_returns_none():
 
 def test_whitespace_only_returns_none():
     assert tag_command("   ") is None
+
+
+def test_classify_returns_mitre():
+    result = classify_command("nmap -sV 10.0.0.1")
+    assert result == ToolClassification("recon", "T1046", "Network Service Discovery")
+
+
+def test_classify_unknown_none():
+    assert classify_command("ls -la") is None
+
+
+def test_classify_empty_none():
+    assert classify_command("") is None
+
+
+def test_classify_full_path():
+    result = classify_command("/usr/bin/nmap -sV 10.0.0.1")
+    assert result == ToolClassification("recon", "T1046", "Network Service Discovery")
+
+
+def test_classify_hydra():
+    result = classify_command("hydra -l admin -P pass.txt ssh://10.0.0.1")
+    assert result is not None
+    assert result.phase == "exploit"
+    assert result.mitre_id == "T1110"

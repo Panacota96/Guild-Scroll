@@ -15,6 +15,9 @@ _HOOK_TEMPLATE = """\
 _gs_real_zshrc="${{GUILD_SCROLL_REAL_HOME:-$HOME}}/.zshrc"
 [ -f "$_gs_real_zshrc" ] && source "$_gs_real_zshrc"
 
+# [REC] prompt indicator
+PROMPT="%F{{red}}[REC]%f %F{{yellow}}{session_name}%f $PROMPT"
+
 # --- Guild Scroll state ---
 _gs_hook_file="{hook_events_path}"
 _gs_seq=0
@@ -71,22 +74,31 @@ precmd() {{
 """
 
 
-def generate_hook_script(hook_events_path: Path, max_asset_size: int = 52428800) -> str:
+def generate_hook_script(
+    hook_events_path: Path,
+    max_asset_size: int = 52428800,
+    session_name: str = "",
+) -> str:
     """Return the zsh hook script as a string."""
     return _HOOK_TEMPLATE.format(
         hook_events_path=str(hook_events_path),
         max_asset_size=max_asset_size,
+        session_name=session_name,
     )
 
 
-def create_zdotdir(hook_events_path: Path, max_asset_size: int = 52428800) -> Path:
+def create_zdotdir(
+    hook_events_path: Path,
+    max_asset_size: int = 52428800,
+    session_name: str = "",
+) -> Path:
     """
     Create a temporary directory to use as ZDOTDIR.
     Returns the path; caller is responsible for cleanup.
     """
     zdotdir = Path(tempfile.mkdtemp(prefix="guild_scroll_zdotdir_"))
     zshrc = zdotdir / ".zshrc"
-    script = generate_hook_script(hook_events_path, max_asset_size)
+    script = generate_hook_script(hook_events_path, max_asset_size, session_name=session_name)
     zshrc.write_text(script, encoding="utf-8")
     zshrc.chmod(zshrc.stat().st_mode | stat.S_IRUSR | stat.S_IWUSR)
     return zdotdir

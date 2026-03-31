@@ -80,7 +80,7 @@ class TestVersionFlag:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.2.0" in result.output
+        assert "0.3.0" in result.output
 
 
 class TestUpdateCommand:
@@ -134,7 +134,7 @@ class TestNoteCommand:
         _make_session(sessions_dir, "note-test")
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["note", "note-test", "found open port 80"])
+        result = runner.invoke(cli, ["note", "found open port 80", "-s", "note-test"])
         assert result.exit_code == 0
         assert "Note added" in result.output
 
@@ -152,7 +152,7 @@ class TestNoteCommand:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["note", "tag-sess", "open port", "--tag", "recon", "--tag", "important"]
+            cli, ["note", "open port", "-s", "tag-sess", "--tag", "recon", "--tag", "important"]
         )
         assert result.exit_code == 0
 
@@ -163,7 +163,25 @@ class TestNoteCommand:
 
     def test_missing_session_errors(self, isolated_sessions_dir):
         runner = CliRunner()
-        result = runner.invoke(cli, ["note", "no-such-session", "some text"])
+        result = runner.invoke(cli, ["note", "some text", "-s", "no-such-session"])
+        assert result.exit_code != 0
+
+    def test_note_auto_detect_session(self, isolated_sessions_dir, monkeypatch):
+        from guild_scroll.config import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "auto-sess")
+        monkeypatch.setenv("GUILD_SCROLL_SESSION", "auto-sess")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["note", "some text"])
+        assert result.exit_code == 0
+        assert "Note added" in result.output
+
+    def test_note_no_session_no_env_fails(self, isolated_sessions_dir, monkeypatch):
+        monkeypatch.delenv("GUILD_SCROLL_SESSION", raising=False)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["note", "some text"])
         assert result.exit_code != 0
 
 
@@ -209,6 +227,25 @@ class TestExportCommand:
         result = runner.invoke(cli, ["export", "ghost-session", "--format", "md"])
         assert result.exit_code != 0
 
+    def test_export_auto_detect_session(self, isolated_sessions_dir, tmp_path, monkeypatch):
+        from guild_scroll.config import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "auto-export-sess")
+        monkeypatch.setenv("GUILD_SCROLL_SESSION", "auto-export-sess")
+
+        out = tmp_path / "report.md"
+        runner = CliRunner()
+        result = runner.invoke(cli, ["export", "--format", "md", "-o", str(out)])
+        assert result.exit_code == 0
+        assert out.exists()
+
+    def test_export_no_session_no_env_fails(self, isolated_sessions_dir, monkeypatch):
+        monkeypatch.delenv("GUILD_SCROLL_SESSION", raising=False)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["export", "--format", "md"])
+        assert result.exit_code != 0
+
 
 class TestReplayCommand:
     def test_missing_session_errors(self, isolated_sessions_dir):
@@ -239,9 +276,25 @@ class TestReplayCommand:
         with patch("subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             result = runner.invoke(cli, ["replay", "replay-sess"])
-        assert mock_run.called
-        args = mock_run.call_args[0][0]
-        assert "scriptreplay" in args
+        # First call is scriptreplay, second is stty sane
+        first_call_args = mock_run.call_args_list[0][0][0]
+        assert "scriptreplay" in first_call_args
+
+    def test_stty_sane_called_after_replay(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir, TIMING_LOG_NAME, RAW_IO_LOG_NAME
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "stty-sess")
+        logs_dir = sessions_dir / "stty-sess" / "logs"
+        (logs_dir / TIMING_LOG_NAME).write_text("0.1 4\n", encoding="utf-8")
+        (logs_dir / RAW_IO_LOG_NAME).write_bytes(b"test")
+
+        runner = CliRunner()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            runner.invoke(cli, ["replay", "stty-sess"])
+        all_calls = [c[0][0] for c in mock_run.call_args_list]
+        assert any("stty" in c for c in all_calls)
 
     def test_speed_flag_passes_divisor(self, isolated_sessions_dir):
         from guild_scroll.config import get_sessions_dir, TIMING_LOG_NAME, RAW_IO_LOG_NAME
@@ -256,5 +309,28 @@ class TestReplayCommand:
         with patch("subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             result = runner.invoke(cli, ["replay", "fast-sess", "--speed", "2.0"])
-        args = mock_run.call_args[0][0]
-        assert "-d" in args
+        first_call_args = mock_run.call_args_list[0][0][0]
+        assert "-d" in first_call_args
+
+    def test_replay_auto_detect_session(self, isolated_sessions_dir, monkeypatch):
+        from guild_scroll.config import get_sessions_dir, TIMING_LOG_NAME, RAW_IO_LOG_NAME
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "auto-replay-sess")
+        logs_dir = sessions_dir / "auto-replay-sess" / "logs"
+        (logs_dir / TIMING_LOG_NAME).write_text("0.1 4\n", encoding="utf-8")
+        (logs_dir / RAW_IO_LOG_NAME).write_bytes(b"test")
+        monkeypatch.setenv("GUILD_SCROLL_SESSION", "auto-replay-sess")
+
+        runner = CliRunner()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            result = runner.invoke(cli, ["replay"])
+        first_call_args = mock_run.call_args_list[0][0][0]
+        assert "scriptreplay" in first_call_args
+
+    def test_replay_no_session_no_env_fails(self, isolated_sessions_dir, monkeypatch):
+        monkeypatch.delenv("GUILD_SCROLL_SESSION", raising=False)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["replay"])
+        assert result.exit_code != 0

@@ -1,7 +1,7 @@
 # Guild Scroll
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.2.0-green)
+![Version](https://img.shields.io/badge/version-0.3.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -30,9 +30,14 @@ Guild Scroll wraps your terminal with `script`/zsh hooks to capture every comman
 - **Structured JSONL logs** — `SessionMeta`, `CommandEvent`, `AssetEvent`, `NoteEvent`
 - **Automatic asset detection** — wget, curl, git clone, tar, unzip, and more
 - **Security tool auto-tagging** — nmap, gobuster, sqlmap, linpeas, and 40+ others auto-classified as recon / exploit / post-exploit
+- **MITRE ATT&CK mapping** — each tool mapped to a MITRE technique ID and name
 - **Session annotations** — add timestamped notes and tags mid-session or after
 - **Export** — Markdown report, self-contained HTML, and asciicast v2 (`.cast`)
 - **Terminal replay** — `gscroll replay` via `scriptreplay`
+- **Command search** — `gscroll search` with `--tool`, `--phase`, `--exit-code`, `--cwd` filters
+- **TUI dashboard** — `gscroll tui` (optional `pip install 'guild-scroll[tui]'`)
+- **`[REC]` prompt indicator** — colored `[REC] session-name` prefix inside a recording
+- **Auto-detect session** — `note`, `export`, `replay`, `search`, `tui` auto-detect the active session
 - **Session management** — start, list, status
 - **Self-update** — `gscroll update` checks GitHub and reinstalls
 
@@ -69,7 +74,9 @@ pip install -e .
 gscroll start htb-machine
 
 # Add a note while working (or after)
-gscroll note htb-machine "found open port 80 — Apache 2.4" --tag recon
+gscroll note "found open port 80 — Apache 2.4" -s htb-machine --tag recon
+# Inside a recording session, -s is optional (auto-detected):
+gscroll note "found open port 80 — Apache 2.4" --tag recon
 
 # Export session to Markdown
 gscroll export htb-machine --format md
@@ -89,6 +96,14 @@ gscroll list
 
 # Check if a session is currently active
 gscroll status
+
+# Search commands in a session
+gscroll search -s htb-machine --phase recon
+gscroll search -s htb-machine --tool nmap --exit-code 0
+
+# Launch the interactive TUI dashboard
+pip install 'guild-scroll[tui]'
+gscroll tui htb-machine
 
 # Update to the latest version
 gscroll update
@@ -155,13 +170,15 @@ The `guild_scroll/` directory is gitignored. Override the base path with the `GU
 - [x] `gscroll replay` — terminal replay via `scriptreplay` with speed control
 - [x] Sessions stored in CWD (`./guild_scroll/`) instead of home directory
 
-### M3 — Visualization & TUI
+### M3 — Visualization & TUI (complete)
 
-- [ ] Attack phase timeline (recon → exploit → post-exploit)
-- [ ] Kill chain mapping (commands → MITRE ATT&CK phases)
-- [ ] TUI dashboard (`gscroll tui`) via Textual
-- [ ] Live session sidebar (command count, assets, elapsed time)
-- [ ] Command search and filter (`gscroll search --tool nmap --phase recon`)
+- [x] Attack phase timeline (recon → exploit → post-exploit)
+- [x] Kill chain mapping (commands → MITRE ATT&CK phases)
+- [x] TUI dashboard (`gscroll tui`) via Textual
+- [x] Live session sidebar (command count, assets, elapsed time)
+- [x] Command search and filter (`gscroll search --tool nmap --phase recon`)
+- [x] `[REC]` colored prompt indicator inside recording sessions
+- [x] Auto-detect active session for `note`, `export`, `replay`, `search`, `tui`
 
 ### M4 — Integration & Automation
 

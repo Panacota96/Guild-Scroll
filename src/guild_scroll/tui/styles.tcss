@@ -1,0 +1,35 @@
+/* Guild Scroll TUI styles */
+
+Screen {
+    background: $surface;
+}
+
+#sidebar {
+    width: 30;
+    height: 100%;
+    dock: left;
+    background: $panel;
+    border-right: solid $primary;
+    padding: 1 2;
+}
+
+#sidebar-title {
+    color: $accent;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#main {
+    height: 100%;
+}
+
+#timeline {
+    height: 5;
+    background: $panel;
+    border-bottom: solid $primary;
+    padding: 0 1;
+}
+
+#table {
+    height: 1fr;
+}

@@ -6,6 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.3.0] — 2026-03-31
+
+### Added
+
+- **`[REC]` prompt indicator** — the zsh hook now injects a colored `[REC] <session-name>` prefix into `$PROMPT` so the recording state is always visible.
+- **`GUILD_SCROLL_SESSION` env propagation** — `start_recording()` now exports `GUILD_SCROLL_SESSION` into the child shell, enabling all sub-commands to auto-detect the active session.
+- **Auto-detect active session** — `note`, `export`, `replay`, `search`, and `tui` all fall back to `GUILD_SCROLL_SESSION` when no session name is provided.
+- **`gscroll note` argument fix** — `session_name` is now a `-s/--session` option instead of a positional argument, so `gscroll note "text"` works without specifying a session name.
+- **`analysis.py`** — `PhaseSpan` dataclass + `compute_phase_timeline()` groups consecutive commands by security phase.
+- **`search.py`** — `SearchFilter` dataclass + `search_commands()` for filtering commands by tool, phase, exit code, and working directory.
+- **`gscroll search`** CLI command — tabular output with `--tool`, `--phase`, `--exit-code`, `--cwd` filters.
+- **MITRE ATT&CK mapping** in `tool_tagger.py` — `ToolClassification` dataclass, `TOOL_CLASSIFICATIONS` dict (38 tools), and `classify_command()` function mapping tools to MITRE technique IDs.
+- **`gscroll tui`** CLI command — launches a Textual TUI dashboard with session sidebar, phase timeline, and command table (requires `pip install 'guild-scroll[tui]'`).
+- **`tui/` package** — `GuildScrollApp`, `SessionSidebar`, `PhaseTimeline`, `CommandTable` widgets, and Textual CSS layout.
+- **`[project.optional-dependencies] tui`** in `pyproject.toml` — `textual>=0.47` as an optional extra.
+
+### Changed
+
+- **`note` command** — `SESSION_NAME` positional argument replaced by `-s/--session` option. Old: `gscroll note htb-box "text"` → New: `gscroll note "text" -s htb-box`.
+- **`export`/`replay` commands** — `SESSION_NAME` argument is now optional; falls back to `GUILD_SCROLL_SESSION`.
+
+---
+
 ## [0.2.0] — 2026-03-31
 
 ### Added

@@ -53,6 +53,7 @@ def start_recording(
     timing_path: Path,
     zdotdir: Path,
     hook_events_path: Path,
+    session_name: str = "",
 ) -> int:
     """
     Launch the script session. Blocks until the user exits.
@@ -65,6 +66,8 @@ def start_recording(
     env["ZDOTDIR"] = str(zdotdir)
     env["GUILD_SCROLL_REAL_HOME"] = str(Path.home())
     env["GUILD_SCROLL_HOOK_FILE"] = str(hook_events_path)
+    if session_name:
+        env["GUILD_SCROLL_SESSION"] = session_name
 
     proc = subprocess.run(cmd, env=env)
     return proc.returncode

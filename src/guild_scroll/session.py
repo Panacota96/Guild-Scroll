@@ -52,7 +52,7 @@ def start_session(raw_name: str) -> None:
     hook_events_path = logs_dir / HOOK_EVENTS_NAME
 
     # Create ZDOTDIR temp dir
-    zdotdir = create_zdotdir(hook_events_path, MAX_ASSET_SIZE_BYTES)
+    zdotdir = create_zdotdir(hook_events_path, MAX_ASSET_SIZE_BYTES, session_name=name)
 
     # Write session_meta start record
     meta = SessionMeta(
@@ -67,7 +67,7 @@ def start_session(raw_name: str) -> None:
     writer.close()
 
     try:
-        start_recording(raw_io_path, timing_path, zdotdir, hook_events_path)
+        start_recording(raw_io_path, timing_path, zdotdir, hook_events_path, session_name=name)
     finally:
         # Always finalize, even if recording crashed
         finalize_session(name, session_id, logs_dir, assets_dir)
