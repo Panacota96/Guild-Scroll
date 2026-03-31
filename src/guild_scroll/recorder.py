@@ -29,7 +29,7 @@ def build_script_command(
     if advanced:
         cmd = [
             "script",
-            "--log-io", str(raw_io_path),
+            "--log-out", str(raw_io_path),
             "--log-timing", str(timing_path),
             "--logging-format", "advanced",
             "--quiet",

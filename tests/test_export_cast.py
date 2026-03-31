@@ -85,3 +85,35 @@ class TestExportCast:
         lines = out.read_text().splitlines()
         header = json.loads(lines[0])
         assert header["title"] == "my-session"
+
+    def test_advanced_format_timing_produces_events(self, tmp_path):
+        """Timing file in advanced (util-linux >= 2.35) O-prefixed format is parsed."""
+        session = _make_session(tmp_path)
+        logs_dir = tmp_path / "logs"
+        (logs_dir / TIMING_LOG_NAME).write_text("O 0.1 6\nO 0.2 5\n", encoding="utf-8")
+        (logs_dir / RAW_IO_LOG_NAME).write_bytes(b"$ who\r\nroot\r")
+        out = tmp_path / "out.cast"
+        export_cast(session, out)
+        lines = [l for l in out.read_text().splitlines() if l.strip()]
+        events = [json.loads(l) for l in lines[1:]]
+        assert len(events) == 2
+        for ev in events:
+            assert ev[1] == "o"
+
+    def test_advanced_format_skips_input_events(self, tmp_path):
+        """I-prefixed timing entries are skipped in the cast output."""
+        session = _make_session(tmp_path)
+        logs_dir = tmp_path / "logs"
+        # O 5 bytes, I 1 byte (input key), O 5 bytes — combined log has 11 bytes
+        (logs_dir / TIMING_LOG_NAME).write_text(
+            "O 0.1 5\nI 0.0 1\nO 0.2 5\n", encoding="utf-8"
+        )
+        (logs_dir / RAW_IO_LOG_NAME).write_bytes(b"helloXworld")  # X = input byte
+        out = tmp_path / "out.cast"
+        export_cast(session, out)
+        lines = [l for l in out.read_text().splitlines() if l.strip()]
+        events = [json.loads(l) for l in lines[1:]]
+        # Only the two O events should appear
+        assert len(events) == 2
+        assert events[0][2] == "hello"
+        assert events[1][2] == "world"

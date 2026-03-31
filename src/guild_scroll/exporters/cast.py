@@ -50,14 +50,29 @@ def export_cast(session: LoadedSession, output: Path) -> None:
             parts = line.split()
             if len(parts) < 2:
                 continue
-            try:
-                delay = float(parts[0])
-                nbytes = int(parts[1])
-            except ValueError:
-                continue
-            accumulated_time += delay
+            # Handle advanced format ("O delay nbytes" / "I delay nbytes")
+            # and legacy format ("delay nbytes").
+            if parts[0] in ('I', 'O'):
+                if len(parts) < 3:
+                    continue
+                include = parts[0] == 'O'
+                try:
+                    delay = float(parts[1])
+                    nbytes = int(parts[2])
+                except ValueError:
+                    continue
+            else:
+                include = True
+                try:
+                    delay = float(parts[0])
+                    nbytes = int(parts[1])
+                except ValueError:
+                    continue
             chunk = raw_data[offset: offset + nbytes]
             offset += nbytes
+            if not include:
+                continue  # skip input events (keep offset advancing)
+            accumulated_time += delay
             try:
                 text = chunk.decode("utf-8", errors="replace")
             except Exception:

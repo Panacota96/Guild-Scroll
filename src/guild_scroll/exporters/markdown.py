@@ -6,6 +6,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from guild_scroll.config import RAW_IO_LOG_NAME
+from guild_scroll.exporters.output_extractor import extract_command_outputs
 from guild_scroll.session_loader import LoadedSession
 from guild_scroll.tool_tagger import tag_command
 
@@ -72,6 +74,28 @@ def export_markdown(session: LoadedSession, output: Path) -> None:
             f"| {cmd.seq} | {rel} | {command_cell} | {cmd.exit_code} | {cwd} | {tag} |"
         )
     lines.append("")
+
+    # Command details with output
+    raw_io_path = session.session_dir / "logs" / RAW_IO_LOG_NAME
+    outputs = extract_command_outputs(raw_io_path)
+
+    lines.append("## Command Details")
+    for i, cmd in enumerate(session.commands):
+        rel = _relative(start_dt, cmd.timestamp_start)
+        tag = tag_command(cmd.command) or "—"
+        lines.append(f"### [{cmd.seq}] `{cmd.command}`")
+        lines.append(
+            f"**Time:** {rel} | **Exit:** {cmd.exit_code} "
+            f"| **Tag:** {tag} | **Dir:** {cmd.working_directory or '—'}"
+        )
+        cmd_output = outputs[i] if i < len(outputs) else ""
+        if cmd_output:
+            lines.append("```")
+            lines.append(cmd_output)
+            lines.append("```")
+        else:
+            lines.append("_No output captured._")
+        lines.append("")
 
     # Notes
     lines.append("## Notes")

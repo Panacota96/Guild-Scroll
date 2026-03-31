@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
 
+from guild_scroll.config import RAW_IO_LOG_NAME
+from guild_scroll.exporters.output_extractor import extract_command_outputs
 from guild_scroll.session_loader import LoadedSession
 from guild_scroll.tool_tagger import tag_command
 
@@ -29,6 +31,11 @@ code { background: #0d0d1a; padding: 2px 5px; border-radius: 3px; color: #7fff7f
 details summary { cursor: pointer; color: #a0cfff; }
 .note { margin: 4px 0; }
 .note-tag { color: #7fb3ff; font-size: 0.85em; }
+.cmd-detail { margin-bottom: 1rem; border-left: 3px solid #333; padding-left: 1rem; }
+.cmd-detail h3 { color: #7fff7f; margin-bottom: 4px; }
+.cmd-meta { color: #aaa; font-size: 0.85em; margin-bottom: 6px; }
+pre.cmd-output { background: #0d0d1a; padding: 10px; border-radius: 4px;
+                 overflow-x: auto; white-space: pre-wrap; margin: 0; }
 """
 
 _HTML_TEMPLATE = Template("""\
@@ -53,6 +60,9 @@ _HTML_TEMPLATE = Template("""\
 <tr><th>#</th><th>Time</th><th>Command</th><th>Exit</th><th>Dir</th><th>Tag</th></tr>
 $timeline_rows
 </table>
+
+<h2>Command Details</h2>
+$cmd_details_html
 
 <h2>Notes</h2>
 <details open>
@@ -135,6 +145,30 @@ def export_html(session: LoadedSession, output: Path) -> None:
         )
     notes_html = "\n".join(note_parts) if note_parts else "<p><em>No notes.</em></p>"
 
+    # Command details with output
+    raw_io_path = session.session_dir / "logs" / RAW_IO_LOG_NAME
+    outputs = extract_command_outputs(raw_io_path)
+    detail_parts: list[str] = []
+    for i, cmd in enumerate(session.commands):
+        rel = _relative(start_dt, cmd.timestamp_start)
+        tag = tag_command(cmd.command)
+        badge = _tag_badge(tag)
+        cmd_output = outputs[i] if i < len(outputs) else ""
+        output_block = (
+            f'<pre class="cmd-output">{html.escape(cmd_output)}</pre>'
+            if cmd_output else
+            '<p><em>No output captured.</em></p>'
+        )
+        detail_parts.append(
+            f'<div class="cmd-detail">'
+            f'<h3>[{cmd.seq}] <code>{html.escape(cmd.command)}</code></h3>'
+            f'<p class="cmd-meta">Time: {rel} &nbsp;|&nbsp; Exit: {cmd.exit_code}'
+            f' &nbsp;|&nbsp; Tag: {badge} &nbsp;|&nbsp; Dir: {html.escape(cmd.working_directory or "—")}</p>'
+            f'{output_block}'
+            f'</div>'
+        )
+    cmd_details_html = "\n".join(detail_parts) if detail_parts else "<p><em>No commands.</em></p>"
+
     # Assets
     if session.assets:
         asset_rows = []
@@ -161,6 +195,7 @@ def export_html(session: LoadedSession, output: Path) -> None:
         duration=html.escape(duration),
         cmd_count=len(session.commands),
         timeline_rows="\n".join(row_parts),
+        cmd_details_html=cmd_details_html,
         note_count=len(session.notes),
         notes_html=notes_html,
         assets_html=assets_html,

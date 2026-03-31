@@ -1,5 +1,5 @@
 """
-Click CLI: gscroll start | list | status | update
+Click CLI: gscroll start | list | status | note | export | replay | search | tui | update
 """
 import sys
 import click
@@ -7,18 +7,48 @@ import click
 from guild_scroll import __version__
 
 
-@click.group()
+@click.group(
+    epilog=(
+        "\b\n"
+        "Common workflows:\n"
+        "  gscroll start htb-machine          # begin recording\n"
+        "  gscroll note \"found port 80\" --tag recon\n"
+        "  gscroll export htb-machine --format md\n"
+        "  gscroll export --format html -o report.html  # inside a session\n"
+        "  gscroll search htb-machine --phase recon --exit-code 0\n"
+        "  gscroll replay htb-machine --speed 2\n"
+        "\n"
+        "Run 'gscroll COMMAND --help' for per-command options and examples."
+    )
+)
 @click.version_option(__version__, prog_name="gscroll")
 def cli():
-    """Guild Scroll — CTF/pentesting session recorder."""
+    """Guild Scroll — CTF/pentesting terminal session recorder.
+
+    Records your terminal session with structured JSONL logs, auto-tags
+    security tools (nmap, sqlmap, linpeas …), exports to Markdown/HTML/
+    asciicast, and provides search and replay.
+    """
 
 
-@cli.command()
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll start htb-machine\n"
+        "  gscroll start               # prompts for a name\n"
+        "\n"
+        "The session directory is created at ./guild_scroll/sessions/<name>/\n"
+        "relative to your current working directory (like .git/).\n"
+        "Type 'exit' or Ctrl-D to stop the recording."
+    )
+)
 @click.argument("session_name", required=False, default=None)
 def start(session_name):
     """Start a new recording session.
 
-    SESSION_NAME is optional; if omitted you will be prompted.
+    SESSION_NAME is optional; you will be prompted if omitted.
+    Inside the session your prompt shows a colored [REC] indicator.
     """
     from guild_scroll.session import start_session
 
@@ -30,9 +60,12 @@ def start(session_name):
     click.echo("[gscroll] Session ended and logs saved.")
 
 
-@cli.command(name="list")
+@cli.command(
+    name="list",
+    epilog="\b\nExample:\n  gscroll list\n",
+)
 def list_sessions():
-    """List all recorded sessions."""
+    """List all recorded sessions with their start time and command count."""
     from guild_scroll.session import list_sessions as _list
 
     sessions = _list()
@@ -48,9 +81,15 @@ def list_sessions():
         click.echo(f"{name:<30} {start:<28} {count:>6}")
 
 
-@cli.command()
+@cli.command(
+    epilog="\b\nExample:\n  gscroll status\n",
+)
 def status():
-    """Show the currently active session (if any)."""
+    """Show the currently active recording session (if any).
+
+    Reads the GUILD_SCROLL_SESSION environment variable which is exported
+    automatically when you run 'gscroll start'.
+    """
     from guild_scroll.session import get_session_status
 
     info = get_session_status()
@@ -62,44 +101,30 @@ def status():
     click.echo(f"  Commands: {info.get('command_count', 0)}")
 
 
-@cli.command()
-def update():
-    """Check for updates and install the latest version."""
-    from guild_scroll.updater import fetch_remote_version, is_newer, run_update
-
-    click.echo(f"Current version: {__version__}")
-    click.echo("Checking for updates...")
-    try:
-        remote_version = fetch_remote_version()
-    except Exception as exc:
-        click.echo(f"Error checking for updates: {exc}", err=True)
-        sys.exit(1)
-
-    if not is_newer(remote_version, __version__):
-        click.echo(f"Already up to date (v{__version__}).")
-        return
-
-    click.echo(f"New version available: {remote_version} (current: {__version__})")
-    click.echo("Installing update...")
-    success, message = run_update()
-    if success:
-        click.echo(f"Updated to v{remote_version}. Restart gscroll to use the new version.")
-    else:
-        click.echo(f"Update failed: {message}", err=True)
-        sys.exit(1)
-
-
-@cli.command()
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll note \"found open port 80\"\n"
+        "  gscroll note \"credentials in /etc/passwd\" --tag creds --tag exploit\n"
+        "\n"
+        "  # Outside a session (specify with -s):\n"
+        "  gscroll note \"root shell obtained\" -s htb-machine --tag post-exploit\n"
+    )
+)
 @click.argument("text")
-@click.option("-s", "--session", "session_name", default=None,
-              help="Session name (auto-detected inside a recording).")
-@click.option("--tag", "tags", multiple=True, help="Tag(s) for this note.")
+@click.option(
+    "-s", "--session", "session_name", default=None,
+    help="Session name. Auto-detected from GUILD_SCROLL_SESSION when inside a recording.",
+)
+@click.option("--tag", "tags", multiple=True, metavar="TAG", help="Tag for this note (repeatable).")
 def note(text, session_name, tags):
-    """Add an annotation note to a session.
+    """Add a timestamped annotation note to a session.
 
-    SESSION_NAME is optional; if omitted, uses GUILD_SCROLL_SESSION env var.
+    TEXT is the note content. Use --tag (repeatable) to attach labels
+    such as 'recon', 'creds', 'flag', etc.
     """
-    import os
     from guild_scroll.session_loader import resolve_session
     from guild_scroll.log_schema import NoteEvent
     from guild_scroll.log_writer import JSONLWriter
@@ -123,17 +148,39 @@ def note(text, session_name, tags):
     click.echo(f"[gscroll] Note added to session '{sess_dir.name}'.")
 
 
-@cli.command()
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll export htb-machine --format md\n"
+        "  gscroll export htb-machine --format html -o report.html\n"
+        "  gscroll export htb-machine --format cast -o session.cast\n"
+        "\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll export --format md\n"
+        "\n"
+        "Formats:\n"
+        "  md    Markdown report with timeline table and command outputs\n"
+        "  html  Self-contained HTML report with color-coded phases\n"
+        "  cast  Asciicast v2 (.cast) playable with asciinema\n"
+    )
+)
 @click.argument("session_name", required=False, default=None)
 @click.option(
     "--format", "fmt",
     type=click.Choice(["md", "html", "cast"], case_sensitive=False),
     required=True,
-    help="Output format: md, html, or cast.",
+    help="Output format: md (Markdown), html (self-contained HTML), or cast (asciicast v2).",
 )
-@click.option("-o", "--output", "output_path", default=None, help="Output file path.")
+@click.option(
+    "-o", "--output", "output_path", default=None, metavar="PATH",
+    help="Output file path. Defaults to <session>.<ext> in the current directory.",
+)
 def export(session_name, fmt, output_path):
-    """Export a recorded session to markdown, HTML, or asciicast format."""
+    """Export a recorded session to Markdown, HTML, or asciicast format.
+
+    SESSION_NAME is optional when inside a recording session.
+    """
     from pathlib import Path
     from guild_scroll.session_loader import load_session, resolve_session
 
@@ -164,14 +211,36 @@ def export(session_name, fmt, output_path):
     click.echo(f"[gscroll] Exported to {out}")
 
 
-@cli.command()
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll search htb-machine --phase recon\n"
+        "  gscroll search htb-machine --tool nmap --exit-code 0\n"
+        "  gscroll search htb-machine --cwd /var/www\n"
+        "  gscroll search htb-machine --phase exploit --exit-code 0\n"
+        "\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll search --phase post-exploit\n"
+        "\n"
+        "Phases: recon, exploit, post-exploit, unknown\n"
+    )
+)
 @click.argument("session_name", required=False, default=None)
-@click.option("--tool", default=None, help="Filter by tool/binary name.")
-@click.option("--phase", default=None, type=click.Choice(["recon", "exploit", "post-exploit", "unknown"]), help="Filter by phase.")
+@click.option("--tool", default=None, metavar="NAME", help="Filter by binary name (e.g. nmap).")
+@click.option(
+    "--phase", default=None,
+    type=click.Choice(["recon", "exploit", "post-exploit", "unknown"]),
+    help="Filter by security phase.",
+)
 @click.option("--exit-code", "exit_code", default=None, type=int, help="Filter by exit code.")
-@click.option("--cwd", default=None, help="Filter by working directory (substring match).")
+@click.option("--cwd", default=None, metavar="DIR", help="Filter by working directory (substring).")
 def search(session_name, tool, phase, exit_code, cwd):
-    """Search commands in a session with filters."""
+    """Search and filter commands recorded in a session.
+
+    SESSION_NAME is optional when inside a recording session.
+    All filters are AND-combined. Omit a filter to match any value.
+    """
     from guild_scroll.session_loader import load_session, resolve_session
     from guild_scroll.search import SearchFilter, search_commands
 
@@ -197,14 +266,37 @@ def search(session_name, tool, phase, exit_code, cwd):
         click.echo(f"{cmd.seq:<4} {phase_tag:<14} {cmd.exit_code:<5} {cmd.command[:45]}")
 
 
-@cli.command()
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll replay htb-machine\n"
+        "  gscroll replay htb-machine --speed 2.0   # 2× faster\n"
+        "  gscroll replay htb-machine --speed 0.5   # half speed\n"
+        "\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll replay\n"
+        "\n"
+        "The prompt shows [REPLAY] instead of [REC] during playback.\n"
+        "Press Ctrl-C to stop early."
+    )
+)
 @click.argument("session_name", required=False, default=None)
-@click.option("--speed", default=1.0, show_default=True, help="Playback speed multiplier.")
+@click.option(
+    "--speed", default=1.0, show_default=True, metavar="MULT",
+    help="Playback speed multiplier (e.g. 2.0 = double speed).",
+)
 def replay(session_name, speed):
-    """Replay a recorded terminal session via scriptreplay."""
+    """Replay a recorded terminal session via scriptreplay.
+
+    SESSION_NAME is optional when inside a recording session.
+    The [REC] prompt indicator is replaced with [REPLAY] during playback.
+    """
+    import shutil
     import subprocess
     from guild_scroll.session_loader import resolve_session
     from guild_scroll.config import RAW_IO_LOG_NAME, TIMING_LOG_NAME
+    from guild_scroll.replay import prepare_replay_logs
 
     try:
         sess_dir = resolve_session(session_name)
@@ -220,7 +312,9 @@ def replay(session_name, speed):
         click.echo("Error: Timing or raw I/O log not found for this session.", err=True)
         sys.exit(1)
 
-    cmd = ["scriptreplay", "--timing", str(timing_path), str(raw_io_path)]
+    tmp_raw, tmp_timing, tmp_dir = prepare_replay_logs(raw_io_path, timing_path)
+
+    cmd = ["scriptreplay", "--timing", str(tmp_timing), str(tmp_raw)]
     if speed != 1.0:
         # scriptreplay uses -d (divisor) to speed up: divisor=0.5 → 2x speed
         divisor = 1.0 / speed
@@ -233,16 +327,36 @@ def replay(session_name, speed):
     except KeyboardInterrupt:
         returncode = 130
     finally:
+        shutil.rmtree(str(tmp_dir), ignore_errors=True)
         # Restore terminal to a sane state — scriptreplay can leave it broken
         subprocess.run(["stty", "sane"], stderr=subprocess.DEVNULL)
 
     sys.exit(returncode)
 
 
-@cli.command()
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  pip install 'guild-scroll[tui]'\n"
+        "  gscroll tui htb-machine\n"
+        "\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll tui\n"
+        "\n"
+        "Keybindings:\n"
+        "  q  Quit    r  Refresh"
+    )
+)
 @click.argument("session_name", required=False, default=None)
 def tui(session_name):
-    """Launch the interactive TUI dashboard for a session."""
+    """Launch the interactive TUI dashboard for a session.
+
+    Requires the optional Textual dependency:
+    pip install 'guild-scroll[tui]'
+
+    SESSION_NAME is optional when inside a recording session.
+    """
     from guild_scroll.session_loader import resolve_session
     try:
         sess_dir = resolve_session(session_name)
@@ -261,3 +375,32 @@ def tui(session_name):
 
     app = GuildScrollApp(sess_dir.name)
     app.run()
+
+
+@cli.command(
+    epilog="\b\nExample:\n  gscroll update\n",
+)
+def update():
+    """Check for updates and install the latest version from GitHub."""
+    from guild_scroll.updater import fetch_remote_version, is_newer, run_update
+
+    click.echo(f"Current version: {__version__}")
+    click.echo("Checking for updates...")
+    try:
+        remote_version = fetch_remote_version()
+    except Exception as exc:
+        click.echo(f"Error checking for updates: {exc}", err=True)
+        sys.exit(1)
+
+    if not is_newer(remote_version, __version__):
+        click.echo(f"Already up to date (v{__version__}).")
+        return
+
+    click.echo(f"New version available: {remote_version} (current: {__version__})")
+    click.echo("Installing update...")
+    success, message = run_update()
+    if success:
+        click.echo(f"Updated to v{remote_version}. Restart gscroll to use the new version.")
+    else:
+        click.echo(f"Update failed: {message}", err=True)
+        sys.exit(1)

@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.3.1] — 2026-03-31
+
+### Fixed
+
+- **Doubled characters in replay** — changed `script` from `--log-io` (input + output) to `--log-out` (output only). Old recordings with `--log-io` replayed doubled keystrokes (`wwhhooaammii`); new recordings are clean.
+- **Asciicast export silent empty** — the cast exporter was silently dropping all events for recordings made with `--logging-format advanced` because it tried to parse `O`/`I` as floats. Now correctly handles both legacy (`delay nbytes`) and advanced (`O delay nbytes`) timing formats, and skips `I` events.
+- **`[REPLAY]` indicator** — `gscroll replay` now creates a temporary copy of `raw_io.log` and `timing.log` with `[REC]` replaced by `[REPLAY]` (timing byte counts updated to match), so the replay prompt reads `[REPLAY]` instead of `[REC]`.
+
+### Added
+
+- **Command output in reports** — `gscroll export --format md` and `--format html` now include a **Command Details** section showing the terminal output of each command, extracted from `raw_io.log` by splitting on `[REC]` prompt lines and stripping ANSI escape sequences.
+- **`replay.py`** — `prepare_replay_logs()` utility: creates temp replay files with `[REC]` → `[REPLAY]` substitution and correct timing byte counts.
+- **`exporters/output_extractor.py`** — `strip_ansi()` and `extract_command_outputs()` utilities for parsing per-command output from raw terminal logs.
+- **Improved `--help`** — every CLI command now shows an examples section and richer option descriptions in `gscroll COMMAND --help`.
+
+---
+
 ## [0.3.0] — 2026-03-31
 
 ### Added

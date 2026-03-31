@@ -86,3 +86,38 @@ class TestExportMarkdown:
         assert "# Session:" in content
         assert "No notes" in content
         assert "No assets" in content
+
+    def test_command_details_section_present(self, tmp_path):
+        cmd = CommandEvent(
+            seq=1, command="whoami",
+            timestamp_start="2026-03-31T12:00:05Z",
+            timestamp_end="2026-03-31T12:00:06Z",
+            exit_code=0, working_directory="/home/kali",
+        )
+        session = _make_session(tmp_path, commands=[cmd])
+        out = tmp_path / "report.md"
+        export_markdown(session, out)
+        content = out.read_text()
+        assert "## Command Details" in content
+        assert "whoami" in content
+
+    def test_command_output_shown_when_raw_io_present(self, tmp_path):
+        """If raw_io.log exists with [REC] output, command output appears in report."""
+        from guild_scroll.config import RAW_IO_LOG_NAME
+        cmd = CommandEvent(
+            seq=1, command="whoami",
+            timestamp_start="2026-03-31T12:00:05Z",
+            timestamp_end="2026-03-31T12:00:06Z",
+            exit_code=0, working_directory="/home/kali",
+        )
+        session = _make_session(tmp_path, commands=[cmd])
+        # Write a fake raw_io.log with [REC] prompt + output
+        logs_dir = tmp_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / RAW_IO_LOG_NAME).write_bytes(
+            b"[REC] test HOST% whoami\ndaviv\n[REC] test HOST% exit\n"
+        )
+        out = tmp_path / "report.md"
+        export_markdown(session, out)
+        content = out.read_text()
+        assert "daviv" in content
