@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"/mnt/c/Users/david/OneDrive - Pontificia Universidad Javeriana/Documents/GitHub/Guild Scroll/.claude/hooks/check-versions.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"/mnt/c/Users/david/OneDrive - Pontificia Universidad Javeriana/Documents/GitHub/Guild Scroll/.claude/hooks/post-compact-recovery.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

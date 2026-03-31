@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.3.2] — 2026-04-01
+
+### Added
+
+- **Claude Code optimization harness** — added project-specific subagents (`.claude/agents/`): `code-reviewer`, `security-auditor`, `test-validator`, `web-researcher`.
+- **Path-scoped rules** (`.claude/rules/`) for Python style, CLI patterns, test conventions, and commit workflow — loaded only when editing matching files.
+- **Skills** (`.claude/skills/`): `/version-bump`, `/run-tests`, `/investigate-online`, `/add-command`.
+- **Hooks** (`.claude/settings.json`): version-consistency pre-commit check, post-compaction context recovery.
+- **Project memory** files documenting architecture, version locations, and project state.
+- **Reference docs** (`docs/context-engineering/`) for context engineering skills.
+
+### Changed
+
+- `CLAUDE.md` simplified from 98 → 52 lines; detailed conventions moved to path-scoped rules and memory files.
+- Current milestone updated to M3 complete, M4 next.
+
+---
+
 ## [0.3.1] — 2026-03-31
 
 ### Fixed
