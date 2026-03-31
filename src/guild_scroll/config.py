@@ -3,7 +3,7 @@ from pathlib import Path
 
 # Base directory for all Guild Scroll data
 def get_base_dir() -> Path:
-    return Path(os.environ.get("GUILD_SCROLL_DIR", Path.home() / ".guild_scroll"))
+    return Path(os.environ.get("GUILD_SCROLL_DIR", Path.cwd() / "guild_scroll"))
 
 def get_sessions_dir() -> Path:
     return get_base_dir() / "sessions"

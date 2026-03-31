@@ -7,7 +7,7 @@ import pytest
 from click.testing import CliRunner
 
 from guild_scroll.cli import cli
-from guild_scroll.log_schema import SessionMeta
+from guild_scroll.log_schema import SessionMeta, CommandEvent
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.utils import iso_timestamp
 
@@ -80,7 +80,7 @@ class TestVersionFlag:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        assert "0.2.0" in result.output
 
 
 class TestUpdateCommand:
@@ -124,3 +124,137 @@ class TestUpdateCommand:
              patch("guild_scroll.updater.is_newer", return_value=False):
             result = runner.invoke(cli, ["update"])
         assert "Current version:" in result.output
+
+
+class TestNoteCommand:
+    def test_note_added_to_session(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "note-test")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["note", "note-test", "found open port 80"])
+        assert result.exit_code == 0
+        assert "Note added" in result.output
+
+        log_file = sessions_dir / "note-test" / "logs" / SESSION_LOG_NAME
+        records = [json.loads(l) for l in log_file.read_text().splitlines() if l.strip()]
+        notes = [r for r in records if r.get("type") == "note"]
+        assert len(notes) == 1
+        assert notes[0]["text"] == "found open port 80"
+
+    def test_note_with_tags(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "tag-sess")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["note", "tag-sess", "open port", "--tag", "recon", "--tag", "important"]
+        )
+        assert result.exit_code == 0
+
+        log_file = sessions_dir / "tag-sess" / "logs" / SESSION_LOG_NAME
+        records = [json.loads(l) for l in log_file.read_text().splitlines() if l.strip()]
+        notes = [r for r in records if r.get("type") == "note"]
+        assert set(notes[0]["tags"]) == {"recon", "important"}
+
+    def test_missing_session_errors(self, isolated_sessions_dir):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["note", "no-such-session", "some text"])
+        assert result.exit_code != 0
+
+
+class TestExportCommand:
+    def test_export_md(self, isolated_sessions_dir, tmp_path):
+        from guild_scroll.config import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "export-sess")
+
+        out = tmp_path / "report.md"
+        runner = CliRunner()
+        result = runner.invoke(cli, ["export", "export-sess", "--format", "md", "-o", str(out)])
+        assert result.exit_code == 0
+        assert out.exists()
+
+    def test_export_html(self, isolated_sessions_dir, tmp_path):
+        from guild_scroll.config import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "html-sess")
+
+        out = tmp_path / "report.html"
+        runner = CliRunner()
+        result = runner.invoke(cli, ["export", "html-sess", "--format", "html", "-o", str(out)])
+        assert result.exit_code == 0
+        assert out.exists()
+
+    def test_export_cast(self, isolated_sessions_dir, tmp_path):
+        from guild_scroll.config import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "cast-sess")
+
+        out = tmp_path / "session.cast"
+        runner = CliRunner()
+        result = runner.invoke(cli, ["export", "cast-sess", "--format", "cast", "-o", str(out)])
+        assert result.exit_code == 0
+        assert out.exists()
+
+    def test_export_missing_session_errors(self, isolated_sessions_dir):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["export", "ghost-session", "--format", "md"])
+        assert result.exit_code != 0
+
+
+class TestReplayCommand:
+    def test_missing_session_errors(self, isolated_sessions_dir):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["replay", "no-such-session"])
+        assert result.exit_code != 0
+
+    def test_missing_logs_errors(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "no-logs")  # has session.jsonl but no timing/raw_io
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["replay", "no-logs"])
+        assert result.exit_code != 0
+
+    def test_replay_invokes_scriptreplay(self, isolated_sessions_dir, tmp_path):
+        from guild_scroll.config import get_sessions_dir, TIMING_LOG_NAME, RAW_IO_LOG_NAME
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "replay-sess")
+        logs_dir = sessions_dir / "replay-sess" / "logs"
+        (logs_dir / TIMING_LOG_NAME).write_text("0.1 4\n", encoding="utf-8")
+        (logs_dir / RAW_IO_LOG_NAME).write_bytes(b"test")
+
+        runner = CliRunner()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            result = runner.invoke(cli, ["replay", "replay-sess"])
+        assert mock_run.called
+        args = mock_run.call_args[0][0]
+        assert "scriptreplay" in args
+
+    def test_speed_flag_passes_divisor(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir, TIMING_LOG_NAME, RAW_IO_LOG_NAME
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "fast-sess")
+        logs_dir = sessions_dir / "fast-sess" / "logs"
+        (logs_dir / TIMING_LOG_NAME).write_text("0.1 4\n", encoding="utf-8")
+        (logs_dir / RAW_IO_LOG_NAME).write_bytes(b"test")
+
+        runner = CliRunner()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            result = runner.invoke(cli, ["replay", "fast-sess", "--speed", "2.0"])
+        args = mock_run.call_args[0][0]
+        assert "-d" in args

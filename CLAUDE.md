@@ -1,38 +1,97 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Project Overview
 
-## Project
+**Guild Scroll** — CTF/pentest terminal session recorder.
+Python 3.11+, Click CLI, JSONL structured logs, stdlib-only (except click).
 
-**Guild Scroll** is a new project in early development. No build system, test runner, or language stack has been configured yet.
+Records terminal sessions with `script`, captures commands via zsh hooks, and exports sessions to Markdown, HTML, and asciicast format.
 
-## Superpowers Framework
+## Build & Test
 
-This project uses [superpowers](https://github.com/obra/superpowers) — a composable skills framework that guides agentic development through structured phases.
+```bash
+# Install in editable mode
+pip install -e .
 
-### Installation (Claude Code)
+# Run tests
+PYTHONPATH=src python3 -m pytest tests/ -v
+
+# Run a command
+gscroll <command>
+```
+
+Entry point: `pyproject.toml` → `gscroll = "guild_scroll.cli:cli"`
+
+## Architecture
+
+| Module | Purpose |
+|--------|---------|
+| `cli.py` | Click command group. Lazy imports per command body. |
+| `session.py` | Session lifecycle: start, finalize, list, status |
+| `session_loader.py` | Load all events from a completed session into `LoadedSession` |
+| `log_schema.py` | Dataclasses: `SessionMeta`, `CommandEvent`, `AssetEvent`, `NoteEvent` |
+| `log_writer.py` | Thread-safe `JSONLWriter` (append + flush) |
+| `hooks.py` | Generates zsh preexec/precmd hooks → `.hook_events.jsonl` |
+| `recorder.py` | Builds + launches `script` command |
+| `config.py` | Path helpers + constants |
+| `asset_detector.py` | Classify commands, snapshot dirs, capture files |
+| `tool_tagger.py` | Map commands to security phases (recon/exploit/post-exploit) |
+| `exporters/markdown.py` | Markdown report formatter |
+| `exporters/html.py` | Self-contained HTML report formatter (inline CSS, no external deps) |
+| `exporters/cast.py` | Asciicast v2 formatter (parses timing.log + raw_io.log) |
+
+## Conventions
+
+- Dataclasses with `to_dict()` / `from_dict()` for all JSONL record types.
+- `type` field is always first key in serialized records (see `to_dict()` pattern).
+- CLI commands use lazy imports inside the function body (avoid circular imports and startup cost).
+- Tests use `isolated_sessions_dir` fixture (autouse in `conftest.py`, redirects to `tmp_path` via `GUILD_SCROLL_DIR` env var).
+- No external deps beyond `click` — stdlib-only for core features.
+- TDD: write tests first, then implementation.
+
+## Session Data
+
+Sessions stored in `./guild_scroll/sessions/<name>/` (CWD-relative, like `.git/`):
 
 ```
-/plugin install superpowers@claude-plugins-official
+guild_scroll/sessions/<name>/
+  logs/
+    session.jsonl       # SessionMeta + CommandEvent + AssetEvent + NoteEvent
+    raw_io.log          # raw terminal I/O (from script)
+    timing.log          # scriptreplay timing data
+  assets/               # captured files
+  screenshots/          # placeholder
 ```
 
-### Workflow
+The `guild_scroll/` directory is gitignored — it is runtime data, not source.
 
-Superpowers drives development through these phases:
+Override the base directory via `GUILD_SCROLL_DIR` env var (used by tests and CI).
 
-1. **Design** — Clarify requirements through dialogue, present spec in sections for approval
-2. **Planning** — Break work into bite-sized tasks (2–5 min each) with file paths and verification steps, emphasizing red/green TDD, YAGNI, and DRY
-3. **Execution** — Subagent-driven task implementation with two-stage review
-4. **QA** — RED-GREEN-REFACTOR cycle enforcement
-5. **Finalization** — Code review and branch completion
+## CLI Commands
 
-### Available Skills
+| Command | Description |
+|---------|-------------|
+| `gscroll start [NAME]` | Start a new recording session |
+| `gscroll list` | List all recorded sessions |
+| `gscroll status` | Show active session (via `GUILD_SCROLL_SESSION` env var) |
+| `gscroll note [SESSION] TEXT [--tag TAG]` | Add an annotation to a session |
+| `gscroll export SESSION --format md\|html\|cast [-o PATH]` | Export session to file |
+| `gscroll replay SESSION [--speed FLOAT]` | Replay session via scriptreplay |
+| `gscroll update` | Check and install latest version |
 
-| Category | Skills |
-|---|---|
-| Testing | `test-driven-development` |
-| Debugging | `systematic-debugging`, `verification-before-completion` |
-| Collaboration | `brainstorming`, `writing-plans`, `executing-plans`, `dispatching-parallel-agents`, `requesting-code-review`, `receiving-code-review`, `using-git-worktrees`, `finishing-a-development-branch`, `subagent-driven-development` |
-| Meta | `writing-skills`, `using-superpowers` |
+## Git Commit Workflow
 
-Skills trigger automatically based on context — manual invocation is generally not needed.
+**REQUIRED** — before any git commit, execute these steps in order:
+
+1. **Versioning analysis** — review all changes since the last commit and determine the correct version bump following semantic versioning:
+   - `PATCH` (0.0.X) — bug fixes, docs, refactors with no behaviour change
+   - `MINOR` (0.X.0) — new backwards-compatible features
+   - `MAJOR` (X.0.0) — breaking changes
+2. **Update version** — apply the bump in `src/guild_scroll/__init__.py`, `pyproject.toml`, the README badge, and any test that asserts the literal version string.
+3. **Update CHANGELOG** — add an entry under the new version with a short summary of changes (create `CHANGELOG.md` if it does not exist yet).
+4. **Update README** — reflect any new commands, features, or milestone status changes.
+5. **Commit** — only after steps 1–4 are complete.
+
+## Current Milestone
+
+M2 — Export & Annotation (session loader, NoteEvent, auto-tagger, md/html/cast export, replay).

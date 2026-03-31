@@ -1,5 +1,5 @@
 import pytest
-from guild_scroll.log_schema import SessionMeta, CommandEvent, AssetEvent
+from guild_scroll.log_schema import SessionMeta, CommandEvent, AssetEvent, NoteEvent
 
 
 class TestSessionMeta:
@@ -60,3 +60,28 @@ class TestAssetEvent:
         assert d["type"] == "asset"
         a2 = AssetEvent.from_dict(d)
         assert a2.captured_path == a.captured_path
+
+
+class TestNoteEvent:
+    def test_roundtrip(self):
+        n = NoteEvent(
+            text="Found open port 80",
+            timestamp="2026-03-31T12:03:00Z",
+            tags=["recon"],
+        )
+        d = n.to_dict()
+        assert d["type"] == "note"
+        assert d["text"] == "Found open port 80"
+        assert d["tags"] == ["recon"]
+        n2 = NoteEvent.from_dict(d)
+        assert n2.text == n.text
+        assert n2.tags == n.tags
+
+    def test_type_is_first_key(self):
+        n = NoteEvent(text="test", timestamp="2026-03-31T12:00:00Z")
+        keys = list(n.to_dict().keys())
+        assert keys[0] == "type"
+
+    def test_default_empty_tags(self):
+        n = NoteEvent(text="no tags", timestamp="2026-03-31T12:00:00Z")
+        assert n.tags == []

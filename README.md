@@ -1,7 +1,7 @@
 # Guild Scroll
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.1.0-green)
+![Version](https://img.shields.io/badge/version-0.2.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -27,8 +27,12 @@ Guild Scroll wraps your terminal with `script`/zsh hooks to capture every comman
 
 - **Terminal session recording** via `script` (raw I/O + timing log)
 - **Zsh hook injection** (`preexec`/`precmd`) for per-command metadata
-- **Structured JSONL logs** — `SessionMeta`, `CommandEvent`, `AssetEvent`
+- **Structured JSONL logs** — `SessionMeta`, `CommandEvent`, `AssetEvent`, `NoteEvent`
 - **Automatic asset detection** — wget, curl, git clone, tar, unzip, and more
+- **Security tool auto-tagging** — nmap, gobuster, sqlmap, linpeas, and 40+ others auto-classified as recon / exploit / post-exploit
+- **Session annotations** — add timestamped notes and tags mid-session or after
+- **Export** — Markdown report, self-contained HTML, and asciicast v2 (`.cast`)
+- **Terminal replay** — `gscroll replay` via `scriptreplay`
 - **Session management** — start, list, status
 - **Self-update** — `gscroll update` checks GitHub and reinstalls
 
@@ -64,6 +68,22 @@ pip install -e .
 # Start a new recording session
 gscroll start htb-machine
 
+# Add a note while working (or after)
+gscroll note htb-machine "found open port 80 — Apache 2.4" --tag recon
+
+# Export session to Markdown
+gscroll export htb-machine --format md
+
+# Export to self-contained HTML
+gscroll export htb-machine --format html -o report.html
+
+# Export to asciicast (playable with asciinema)
+gscroll export htb-machine --format cast
+
+# Replay the raw terminal session
+gscroll replay htb-machine
+gscroll replay htb-machine --speed 2.0
+
 # List all past sessions
 gscroll list
 
@@ -78,39 +98,44 @@ gscroll update
 
 ## How It Works
 
-1. `gscroll start <name>` creates `~/.guild_scroll/sessions/<name>/` and launches `script` to capture raw I/O.
-2. Zsh hooks (`preexec`/`precmd`) write a `CommandEvent` JSONL entry for each command — timestamped, with exit code and duration.
+1. `gscroll start <name>` creates `./guild_scroll/sessions/<name>/` in the current working directory and launches `script` to capture raw I/O.
+2. Zsh hooks (`preexec`/`precmd`) write a `CommandEvent` JSONL entry for each command — timestamped, with exit code and working directory.
 3. The hook parser scans each command for download/extract patterns and writes `AssetEvent` entries.
 4. On exit, `SessionMeta` is updated with the final command count and end time.
+5. `gscroll note` appends a `NoteEvent` to the session log at any point.
+6. `gscroll export` loads the session and renders it to Markdown, HTML, or asciicast format, with commands auto-tagged by security phase.
 
 ---
 
 ## Session Format
 
-Sessions are stored under `~/.guild_scroll/sessions/<name>/`:
+Sessions are stored under `./guild_scroll/sessions/<name>/` (CWD-local, like `.git/`):
 
 ```
 <name>/
 ├── logs/
-│   ├── session.jsonl   # structured events (SessionMeta + CommandEvent + AssetEvent)
+│   ├── session.jsonl   # SessionMeta + CommandEvent + AssetEvent + NoteEvent
 │   ├── raw_io.log      # raw terminal I/O (scriptreplay source)
 │   └── timing.log      # timing data for scriptreplay
-└── assets/             # captured files (future)
+└── assets/             # captured files
 ```
+
+The `guild_scroll/` directory is gitignored. Override the base path with the `GUILD_SCROLL_DIR` environment variable.
 
 ### JSONL event types
 
 | Type | Key fields |
 |---|---|
-| `SessionMeta` | `session_name`, `session_id`, `start_time`, `hostname`, `command_count` |
-| `CommandEvent` | `session_id`, `timestamp`, `command`, `exit_code`, `duration_ms`, `cwd` |
-| `AssetEvent` | `session_id`, `timestamp`, `asset_type`, `source_url`, `local_path` |
+| `session_meta` | `session_name`, `session_id`, `start_time`, `hostname`, `end_time`, `command_count` |
+| `command` | `seq`, `command`, `timestamp_start`, `timestamp_end`, `exit_code`, `working_directory` |
+| `asset` | `seq`, `trigger_command`, `asset_type`, `captured_path`, `original_path`, `timestamp` |
+| `note` | `text`, `timestamp`, `tags` |
 
 ---
 
 ## Roadmap
 
-### M1 — Core (current)
+### M1 — Core (complete)
 
 - [x] Terminal session recording via `script`
 - [x] Zsh hook injection (preexec/precmd) for command logging
@@ -119,15 +144,16 @@ Sessions are stored under `~/.guild_scroll/sessions/<name>/`:
 - [x] Session management (start, list, status)
 - [x] Self-update command
 
-### M2 — Export & Annotation
+### M2 — Export & Annotation (complete)
 
-- [ ] `gscroll export --format md` — Markdown session report
-- [ ] `gscroll export --format html` — self-contained HTML report with timeline
-- [ ] `gscroll export --format pdf` — PDF via pandoc/WeasyPrint
-- [ ] `gscroll export --format cast` — asciinema-compatible export
-- [ ] `gscroll replay` — terminal replay via `scriptreplay`
-- [ ] `gscroll note` — add timestamped annotations to sessions
-- [ ] Auto-tagging of security tools (nmap, gobuster, sqlmap, etc.)
+- [x] `NoteEvent` — timestamped annotations with tags
+- [x] `gscroll note` — add notes to any session
+- [x] Security tool auto-tagger (recon / exploit / post-exploit)
+- [x] `gscroll export --format md` — Markdown session report with timeline table
+- [x] `gscroll export --format html` — self-contained HTML report with color-coded phases
+- [x] `gscroll export --format cast` — asciicast v2 export for asciinema
+- [x] `gscroll replay` — terminal replay via `scriptreplay` with speed control
+- [x] Sessions stored in CWD (`./guild_scroll/`) instead of home directory
 
 ### M3 — Visualization & TUI
 

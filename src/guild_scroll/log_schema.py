@@ -71,3 +71,21 @@ class AssetEvent:
         d = dict(d)
         d.pop("type", None)
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class NoteEvent:
+    text: str
+    timestamp: str
+    tags: list[str] = field(default_factory=list)
+    type: str = field(default="note", init=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        return {"type": d.pop("type"), **d}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> NoteEvent:
+        d = dict(d)
+        d.pop("type", None)
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})

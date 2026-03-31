@@ -37,9 +37,9 @@ precmd() {{
     _end=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
     _gs_seq=$(( _gs_seq + 1 ))
     local _cmd_escaped
-    _cmd_escaped=$(printf '%s' "$_gs_last_cmd" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    _cmd_escaped=$(printf '%s' "$_gs_last_cmd" | sed 's/\\\\/\\\\\\\\/g' | sed 's/"/\\\\"/g')
     local _cwd_escaped
-    _cwd_escaped=$(printf '%s' "$PWD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    _cwd_escaped=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g' | sed 's/"/\\\\"/g')
     printf '{{"type":"command","seq":%d,"command":"%s","timestamp_start":"%s","timestamp_end":"%s","exit_code":%d,"working_directory":"%s"}}\n' \
         "$_gs_seq" "$_cmd_escaped" "$_gs_cmd_start" "$_end" "$_exit" "$_cwd_escaped" \
         >> "$_gs_hook_file"
@@ -56,9 +56,9 @@ precmd() {{
             _fsize=$(stat -c%s "$_fpath" 2>/dev/null || echo 0)
             if [ "$_fsize" -le {max_asset_size} ] 2>/dev/null; then
                 local _fname_escaped
-                _fname_escaped=$(printf '%s' "$_fname" | sed 's/\\/\\\\/g; s/"/\\"/g')
+                _fname_escaped=$(printf '%s' "$_fname" | sed 's/\\\\/\\\\\\\\/g' | sed 's/"/\\\\"/g')
                 local _fpath_escaped
-                _fpath_escaped=$(printf '%s' "$_fpath" | sed 's/\\/\\\\/g; s/"/\\"/g')
+                _fpath_escaped=$(printf '%s' "$_fpath" | sed 's/\\\\/\\\\\\\\/g' | sed 's/"/\\\\"/g')
                 printf '{{"type":"asset_hint","seq":%d,"trigger_command":"%s","original_path":"%s","timestamp":"%s"}}\n' \
                     "$_gs_seq" "$_cmd_escaped" "$_fpath_escaped" "$_end" \
                     >> "$_gs_hook_file"

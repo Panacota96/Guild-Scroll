@@ -24,6 +24,7 @@ htmlcov/
 # Guild Scroll runtime
 sessions/*/
 !sessions/.gitkeep
+/guild_scroll/
 
 # Temp ZDOTDIR dirs
 /tmp/guild_scroll_zdotdir_*/
