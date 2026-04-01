@@ -1,5 +1,6 @@
 """
 Click CLI: gscroll start | list | status | note | export | replay | search | tui | update
+           join | share | import
 """
 import sys
 import click
@@ -44,19 +45,27 @@ def cli():
     )
 )
 @click.argument("session_name", required=False, default=None)
-def start(session_name):
+@click.option(
+    "--join", "join_session", is_flag=True, default=False,
+    help="Attach to an existing session as a new terminal part.",
+)
+def start(session_name, join_session):
     """Start a new recording session.
 
     SESSION_NAME is optional; you will be prompted if omitted.
     Inside the session your prompt shows a colored [REC] indicator.
+    Use --join to attach a second terminal to an existing session.
     """
     from guild_scroll.session import start_session
 
     if not session_name:
         session_name = click.prompt("Session name", default="session")
 
-    click.echo(f"[gscroll] Starting session '{session_name}' — type 'exit' or Ctrl-D to stop.")
-    start_session(session_name)
+    if join_session:
+        click.echo(f"[gscroll] Joining session '{session_name}' as a new part — type 'exit' or Ctrl-D to stop.")
+    else:
+        click.echo(f"[gscroll] Starting session '{session_name}' — type 'exit' or Ctrl-D to stop.")
+    start_session(session_name, join=join_session)
     click.echo("[gscroll] Session ended and logs saved.")
 
 
@@ -168,16 +177,20 @@ def note(text, session_name, tags):
 @click.argument("session_name", required=False, default=None)
 @click.option(
     "--format", "fmt",
-    type=click.Choice(["md", "html", "cast"], case_sensitive=False),
+    type=click.Choice(["md", "html", "cast", "obsidian"], case_sensitive=False),
     required=True,
-    help="Output format: md (Markdown), html (self-contained HTML), or cast (asciicast v2).",
+    help="Output format: md (Markdown), html (HTML), cast (asciicast v2), or obsidian (vault folder).",
 )
 @click.option(
     "-o", "--output", "output_path", default=None, metavar="PATH",
-    help="Output file path. Defaults to <session>.<ext> in the current directory.",
+    help="Output file/directory path. Defaults to <session>.<ext> in the current directory.",
 )
-def export(session_name, fmt, output_path):
-    """Export a recorded session to Markdown, HTML, or asciicast format.
+@click.option(
+    "--part", "part_num", default=None, type=int, metavar="N",
+    help="For cast format: which terminal part to export (default: 1).",
+)
+def export(session_name, fmt, output_path, part_num):
+    """Export a recorded session to Markdown, HTML, asciicast, or Obsidian format.
 
     SESSION_NAME is optional when inside a recording session.
     """
@@ -193,20 +206,26 @@ def export(session_name, fmt, output_path):
 
     actual_name = sess_dir.name
     ext_map = {"md": ".md", "html": ".html", "cast": ".cast"}
-    if output_path:
-        out = Path(output_path)
-    else:
-        out = Path(f"{actual_name}{ext_map[fmt]}")
 
-    if fmt == "md":
-        from guild_scroll.exporters.markdown import export_markdown
-        export_markdown(session, out)
-    elif fmt == "html":
-        from guild_scroll.exporters.html import export_html
-        export_html(session, out)
-    elif fmt == "cast":
-        from guild_scroll.exporters.cast import export_cast
-        export_cast(session, out)
+    if fmt == "obsidian":
+        out = Path(output_path) if output_path else Path(f"{actual_name}-obsidian")
+        from guild_scroll.exporters.obsidian import export_obsidian
+        export_obsidian(session, out)
+    else:
+        if output_path:
+            out = Path(output_path)
+        else:
+            out = Path(f"{actual_name}{ext_map[fmt]}")
+
+        if fmt == "md":
+            from guild_scroll.exporters.markdown import export_markdown
+            export_markdown(session, out)
+        elif fmt == "html":
+            from guild_scroll.exporters.html import export_html
+            export_html(session, out)
+        elif fmt == "cast":
+            from guild_scroll.exporters.cast import export_cast
+            export_cast(session, out, part=part_num or 1)
 
     click.echo(f"[gscroll] Exported to {out}")
 
@@ -375,6 +394,99 @@ def tui(session_name):
 
     app = GuildScrollApp(sess_dir.name)
     app.run()
+
+
+@cli.command(
+    name="join",
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll join htb-machine\n"
+        "  gscroll join                 # auto-detects session from GUILD_SCROLL_SESSION\n"
+        "\n"
+        "Merges all terminal parts into a unified timeline in logs/session.jsonl.\n"
+        "Run this after all terminals have exited."
+    )
+)
+@click.argument("session_name", required=False, default=None)
+def join(session_name):
+    """Merge multi-terminal session parts into a unified timeline.
+
+    Run after all terminals for a multi-part session have exited.
+    SESSION_NAME is optional when GUILD_SCROLL_SESSION is set.
+    """
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.merge import merge_parts
+
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    merged = merge_parts(sess_dir.name)
+    click.echo(
+        f"[gscroll] Merged {len(merged.parts)} parts into '{sess_dir.name}' "
+        f"({len(merged.commands)} commands total)."
+    )
+
+
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll share htb-machine\n"
+        "  gscroll share htb-machine -o htb-machine.tar.gz\n"
+        "\n"
+        "Creates a .tar.gz archive you can share with teammates."
+    )
+)
+@click.argument("session_name", required=False, default=None)
+@click.option(
+    "-o", "--output", "output_path", default=None, metavar="PATH",
+    help="Output archive path. Defaults to <session>.tar.gz.",
+)
+def share(session_name, output_path):
+    """Export a session as a shareable .tar.gz archive."""
+    from pathlib import Path
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.sharing import export_archive
+
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    out = Path(output_path) if output_path else Path(f"{sess_dir.name}.tar.gz")
+    export_archive(sess_dir, out)
+    click.echo(f"[gscroll] Session archived to {out}")
+
+
+@cli.command(
+    name="import",
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll import htb-machine.tar.gz\n"
+        "\n"
+        "Extracts the archive into the current sessions directory."
+    )
+)
+@click.argument("archive_path", type=click.Path(exists=True))
+def import_session(archive_path):
+    """Import a shared session archive into the current sessions directory."""
+    from pathlib import Path
+    from guild_scroll.config import get_sessions_dir
+    from guild_scroll.sharing import import_archive
+
+    try:
+        name = import_archive(Path(archive_path), get_sessions_dir())
+    except (ValueError, Exception) as exc:
+        click.echo(f"Error importing archive: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"[gscroll] Imported session '{name}'.")
 
 
 @cli.command(

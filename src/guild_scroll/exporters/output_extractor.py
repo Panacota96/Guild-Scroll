@@ -29,6 +29,14 @@ def strip_ansi(text: str) -> str:
     return _ANSI_RE.sub('', text)
 
 
+def extract_command_outputs_multipart(raw_io_paths: dict[int, Path]) -> dict[int, list[str]]:
+    """
+    Extract per-command outputs from multiple raw_io.log files (one per part).
+    Returns {part_number: [outputs_per_command_in_that_part]}.
+    """
+    return {part: extract_command_outputs(path) for part, path in raw_io_paths.items()}
+
+
 def extract_command_outputs(raw_io_path: Path) -> list[str]:
     """
     Return a list of command outputs extracted from *raw_io_path*, in order.

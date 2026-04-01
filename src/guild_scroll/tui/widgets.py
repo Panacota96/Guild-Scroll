@@ -48,6 +48,7 @@ class SessionSidebar(Widget):
             f"Commands: {len(session.commands)}",
             f"Assets: {len(session.assets)}",
             f"Notes: {len(session.notes)}",
+            f"Parts: {len(session.parts)}",
             "",
             "Phase breakdown:",
         ]
@@ -98,7 +99,7 @@ class CommandTable(Widget):
 
     def compose(self) -> ComposeResult:
         table = DataTable(id="cmd-datatable")
-        table.add_columns("#", "Phase", "Exit", "CWD", "Command")
+        table.add_columns("#", "Phase", "Exit", "Part", "CWD", "Command")
         yield table
 
     def update_session(self, session: LoadedSession) -> None:
@@ -110,6 +111,7 @@ class CommandTable(Widget):
                 str(cmd.seq),
                 phase,
                 str(cmd.exit_code),
+                str(cmd.part),
                 cmd.working_directory[:20],
                 cmd.command[:40],
             )

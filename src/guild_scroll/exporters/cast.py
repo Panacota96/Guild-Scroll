@@ -10,14 +10,15 @@ from guild_scroll.config import RAW_IO_LOG_NAME, TIMING_LOG_NAME
 from guild_scroll.session_loader import LoadedSession
 
 
-def export_cast(session: LoadedSession, output: Path) -> None:
+def export_cast(session: LoadedSession, output: Path, part: int = 1) -> None:
     """Write an asciicast v2 file for *session* to *output*.
 
-    Requires raw_io.log and timing.log in the session's logs directory.
+    For multi-part sessions, exports the specified *part* (default 1).
+    Requires raw_io.log and timing.log for the selected part.
     """
-    logs_dir = session.session_dir / "logs"
-    raw_io_path = logs_dir / RAW_IO_LOG_NAME
-    timing_path = logs_dir / TIMING_LOG_NAME
+    # Resolve paths for the requested part
+    raw_io_path = session.raw_io_paths.get(part, session.session_dir / "logs" / RAW_IO_LOG_NAME)
+    timing_path = session.timing_paths.get(part, session.session_dir / "logs" / TIMING_LOG_NAME)
 
     # Determine epoch timestamp from session meta
     try:
