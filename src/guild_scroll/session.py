@@ -195,7 +195,7 @@ def finalize_session(
                         )
                         writer.write(asset_event.to_dict())
 
-        _patch_session_meta(final_log, iso_timestamp(), command_count)
+        _patch_session_meta_file(writer._fh, iso_timestamp(), command_count)
 
     # Clean up intermediate hook events
     try:
@@ -213,7 +213,15 @@ def _patch_session_meta(log_path: Path, end_time: str, command_count: int) -> No
     """Read session.jsonl, update the session_meta record, rewrite."""
     if not log_path.exists():
         return
-    lines = log_path.read_text(encoding="utf-8").splitlines()
+    with JSONLWriter(log_path) as writer:
+        _patch_session_meta_file(writer._fh, end_time, command_count)
+
+
+def _patch_session_meta_file(fh, end_time: str, command_count: int) -> None:
+    """Patch session_meta in-place using an already-open a+ compatible handle."""
+    fh.flush()
+    fh.seek(0)
+    lines = fh.read().splitlines()
     updated = []
     for line in lines:
         line = line.strip()
@@ -228,7 +236,10 @@ def _patch_session_meta(log_path: Path, end_time: str, command_count: int) -> No
             record["end_time"] = end_time
             record["command_count"] = command_count
         updated.append(json.dumps(record, ensure_ascii=False))
-    log_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    fh.seek(0)
+    fh.truncate()
+    fh.write("\n".join(updated) + "\n")
+    fh.flush()
 
 
 def list_sessions() -> list[dict]:

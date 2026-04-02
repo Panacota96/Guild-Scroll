@@ -23,8 +23,8 @@ class JSONLWriter:
         self._lock = threading.Lock()
         self._file_lock_held = False
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        # Open in append mode so we can resume
-        self._fh = open(self._path, "a", encoding="utf-8")
+        # Use a+ so writes still append while metadata patching can seek/read/truncate.
+        self._fh = open(self._path, "a+", encoding="utf-8")
 
     def write(self, record: dict[str, Any]) -> None:
         line = json.dumps(record, ensure_ascii=False)
@@ -51,8 +51,10 @@ class JSONLWriter:
         if fcntl is not None:
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
         elif msvcrt is not None:
+            position = self._fh.tell()
             self._fh.seek(0)
             msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+            self._fh.seek(position)
 
         self._file_lock_held = True
 
@@ -63,7 +65,9 @@ class JSONLWriter:
         if fcntl is not None:
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
         elif msvcrt is not None:
+            position = self._fh.tell()
             self._fh.seek(0)
             msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+            self._fh.seek(position)
 
         self._file_lock_held = False

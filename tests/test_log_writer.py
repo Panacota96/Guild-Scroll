@@ -56,6 +56,8 @@ def test_flush_after_write(tmp_path):
 
 def test_separate_instances_serialize_writes_to_same_file(tmp_path):
     class SlowFile:
+        """Proxy that slows writes so concurrent writers would interleave without locking."""
+
         def __init__(self, fh):
             self._fh = fh
 
