@@ -9,6 +9,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from guild_scroll.config import RAW_IO_LOG_NAME
+from guild_scroll.session_loader import LoadedSession
+
 # Strips common ANSI/VT escape sequences: CSI (ESC[...), OSC (ESC]...),
 # 2-char ESC sequences, and charset selectors.
 _ANSI_RE = re.compile(
@@ -76,3 +79,27 @@ def extract_command_outputs(raw_io_path: Path) -> list[str]:
         outputs.append(raw_output.strip())
 
     return outputs
+
+
+def build_command_output_map(session: LoadedSession) -> dict[tuple[int, int], str]:
+    """Return {(part, seq): output} for the commands present in *session*."""
+    if session.command_outputs:
+        return dict(session.command_outputs)
+
+    if session.raw_io_paths:
+        part_outputs = extract_command_outputs_multipart(session.raw_io_paths)
+        output_map: dict[tuple[int, int], str] = {}
+        part_indices: dict[int, int] = {p: 0 for p in (session.parts or [1])}
+        for cmd in session.commands:
+            idx = part_indices.get(cmd.part, 0)
+            outputs = part_outputs.get(cmd.part, [])
+            output_map[(cmd.part, cmd.seq)] = outputs[idx] if idx < len(outputs) else ""
+            part_indices[cmd.part] = idx + 1
+        return output_map
+
+    raw_io_path = session.session_dir / "logs" / RAW_IO_LOG_NAME
+    outputs = extract_command_outputs(raw_io_path)
+    return {
+        (cmd.part, cmd.seq): outputs[index] if index < len(outputs) else ""
+        for index, cmd in enumerate(session.commands)
+    }

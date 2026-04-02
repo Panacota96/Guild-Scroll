@@ -10,11 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ### Added
 
-- **`gscroll restore`** — restores `parts/` from `parts.backup/` after a failed multi-part merge.
-
-### Fixed
-
-- **Safer multi-part merges** — `merge_parts()` now renames `parts/` to `parts.backup/`, validates every merged JSONL line plus the total command count before cleanup, and preserves the backup when the merged log write fails.
+- **Shared GitHub Copilot customizations** — scaffolded repository-scoped instructions, agents, skills, hook guidance, and top-level Copilot instructions under `.github/`.
+- **Contributor guidance refresh** — README and CLAUDE now point contributors to the shared `.github/` Copilot assets for TDD, release prep, and issue drafting.
 
 ---
 
