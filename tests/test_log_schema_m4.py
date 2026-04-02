@@ -127,6 +127,10 @@ class TestScreenshotEvent:
         s = ScreenshotEvent(seq=1, event_type="flag", trigger_command="cat root.txt")
         assert s.type == "screenshot"
 
+    def test_default_part_is_1(self):
+        s = ScreenshotEvent(seq=1, event_type="flag", trigger_command="cat root.txt")
+        assert s.part == 1
+
     def test_default_screenshot_path_is_none(self):
         s = ScreenshotEvent(seq=1, event_type="flag", trigger_command="cat root.txt")
         assert s.screenshot_path is None
@@ -155,3 +159,7 @@ class TestScreenshotEvent:
         }
         s = ScreenshotEvent.from_dict(d)
         assert s.seq == 1
+
+    def test_roundtrip_with_part(self):
+        s = ScreenshotEvent(seq=2, event_type="flag", trigger_command="x", part=2)
+        assert ScreenshotEvent.from_dict(s.to_dict()).part == 2

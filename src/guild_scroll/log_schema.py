@@ -104,6 +104,7 @@ class ScreenshotEvent:
     screenshot_path: Optional[str] = None  # relative to session dir, None if capture failed
     timestamp: str = ""
     type: str = field(default="screenshot", init=False)
+    part: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

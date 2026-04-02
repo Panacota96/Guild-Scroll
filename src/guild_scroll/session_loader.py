@@ -132,7 +132,17 @@ def _load_events_from_records(
         elif rtype == "note":
             notes.append(NoteEvent.from_dict(record))
         elif rtype == "screenshot":
-            screenshots.append(ScreenshotEvent.from_dict(record))
+            screenshot = ScreenshotEvent.from_dict(record)
+            if screenshot.part == 1 and part != 1:
+                screenshot = ScreenshotEvent(
+                    seq=screenshot.seq,
+                    event_type=screenshot.event_type,
+                    trigger_command=screenshot.trigger_command,
+                    screenshot_path=screenshot.screenshot_path,
+                    timestamp=screenshot.timestamp,
+                    part=part,
+                )
+            screenshots.append(screenshot)
 
     return meta, commands, assets, notes, screenshots
 
