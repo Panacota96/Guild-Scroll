@@ -8,9 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ## [0.4.1] — 2026-04-02
 
-### Fixed
+### Added
 
-- **Asset capture path traversal** — `finalize_session()` now validates asset hint paths against the originating command's working directory, rejects `..` traversal or out-of-tree resolved paths with a warning, and skips copying rejected files into `assets/`.
+- **Shared GitHub Copilot customizations** — scaffolded repository-scoped instructions, agents, skills, hook guidance, and top-level Copilot instructions under `.github/`.
+- **Contributor guidance refresh** — README and CLAUDE now point contributors to the shared `.github/` Copilot assets for TDD, release prep, and issue drafting.
 
 ---
 

@@ -7,6 +7,7 @@ import os
 import shutil
 import socket
 from pathlib import Path
+import threading
 from typing import Optional
 
 from guild_scroll.config import (
@@ -25,7 +26,8 @@ from guild_scroll.recorder import start_recording
 from guild_scroll.utils import iso_timestamp, sanitize_session_name, generate_session_id
 
 
-logger = logging.getLogger(__name__)
+_FINALIZE_LOCKS: dict[Path, threading.Lock] = {}
+_FINALIZE_LOCKS_GUARD = threading.Lock()
 
 
 def _session_dir(session_name: str) -> Path:
@@ -82,9 +84,8 @@ def start_session(raw_name: str, join: bool = False) -> None:
         platform=platform,
     )
     final_log = logs_dir / SESSION_LOG_NAME
-    writer = JSONLWriter(final_log)
-    writer.write(meta.to_dict())
-    writer.close()
+    with JSONLWriter(final_log) as writer:
+        writer.write(meta.to_dict())
 
     try:
         start_recording(raw_io_path, timing_path, hook_dir, hook_events_path, session_name=name, shell=shell)
@@ -122,9 +123,8 @@ def _start_part(session_name: str, sess_dir: Path) -> None:
         hostname=socket.gethostname(),
     )
     part_log = part_logs_dir / SESSION_LOG_NAME
-    writer = JSONLWriter(part_log)
-    writer.write(part_meta.to_dict())
-    writer.close()
+    with JSONLWriter(part_log) as writer:
+        writer.write(part_meta.to_dict())
 
     env_part = str(next_part)
     try:
@@ -161,68 +161,57 @@ def finalize_session(
     """
     hook_events_path = logs_dir / HOOK_EVENTS_NAME
     final_log = logs_dir / SESSION_LOG_NAME
+    with _get_finalize_lock(final_log):
+        command_count = _read_command_count(final_log)
+        events: list[dict] = []
+        if hook_events_path.exists():
+            for line in hook_events_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
 
-    events: list[dict] = []
-    if hook_events_path.exists():
-        for line in hook_events_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+        # Re-open final log in append mode
+        writer = JSONLWriter(final_log)
 
-    # Re-open final log in append mode
-    writer = JSONLWriter(final_log)
+        for evt in events:
+            etype = evt.get("type")
+            if etype == "command":
+                try:
+                    # Inject part number
+                    evt["part"] = part
+                    cmd_event = CommandEvent.from_dict(evt)
+                    writer.write(cmd_event.to_dict())
+                    command_count += 1
+                except (TypeError, KeyError):
+                    pass
+            elif etype == "asset_hint":
+                original_path = Path(evt.get("original_path", ""))
+                if original_path.exists():
+                    dest = _capture_asset_for_event(original_path, assets_dir)
+                    if dest:
+                        asset_event = AssetEvent(
+                            seq=evt.get("seq", 0),
+                            trigger_command=evt.get("trigger_command", ""),
+                            asset_type="download",
+                            captured_path=str(dest.relative_to(assets_dir.parent)),
+                            original_path=str(original_path),
+                            timestamp=evt.get("timestamp", iso_timestamp()),
+                            part=part,
+                        )
+                        writer.write(asset_event.to_dict())
 
-    command_count = 0
-    command_working_directories: dict[int, Path] = {}
-    for evt in events:
-        etype = evt.get("type")
-        if etype == "command":
-            try:
-                # Inject part number
-                evt["part"] = part
-                cmd_event = CommandEvent.from_dict(evt)
-                writer.write(cmd_event.to_dict())
-                command_working_directories[cmd_event.seq] = Path(cmd_event.working_directory)
-                command_count += 1
-            except (TypeError, KeyError):
-                pass
-        elif etype == "asset_hint":
-            original_path = Path(evt.get("original_path", ""))
-            working_directory = command_working_directories.get(evt.get("seq", 0))
-            resolved_path = _resolve_asset_path_for_event(original_path, working_directory)
-            if resolved_path is None:
-                logger.warning(
-                    "Rejected asset path %s for session %s",
-                    original_path,
-                    name,
-                )
-                continue
-            if resolved_path.exists():
-                dest = _capture_asset_for_event(resolved_path, assets_dir)
-                if dest:
-                    asset_event = AssetEvent(
-                        seq=evt.get("seq", 0),
-                        trigger_command=evt.get("trigger_command", ""),
-                        asset_type="download",
-                        captured_path=str(dest.relative_to(assets_dir.parent)),
-                        original_path=str(original_path),
-                        timestamp=evt.get("timestamp", iso_timestamp()),
-                        part=part,
-                    )
-                    writer.write(asset_event.to_dict())
+        writer.close()
+        _patch_session_meta(final_log, iso_timestamp(), command_count)
 
-    writer.close()
-    _patch_session_meta(final_log, iso_timestamp(), command_count)
-
-    # Clean up intermediate hook events
-    try:
-        hook_events_path.unlink()
-    except FileNotFoundError:
-        pass
+        # Clean up intermediate hook events
+        try:
+            hook_events_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _capture_asset_for_event(source: Path, assets_dir: Path) -> Optional[Path]:
@@ -230,18 +219,57 @@ def _capture_asset_for_event(source: Path, assets_dir: Path) -> Optional[Path]:
     return capture_asset(source, assets_dir, MAX_ASSET_SIZE_BYTES)
 
 
-def _resolve_asset_path_for_event(source: Path, working_directory: Optional[Path]) -> Optional[Path]:
-    if working_directory is None:
-        return None
-    from guild_scroll.asset_detector import resolve_asset_source_path
-    return resolve_asset_source_path(source, working_directory)
+def _get_finalize_lock(log_path: Path) -> threading.Lock:
+    resolved = log_path.resolve()
+    with _FINALIZE_LOCKS_GUARD:
+        return _FINALIZE_LOCKS.setdefault(resolved, threading.Lock())
+
+
+def _read_command_count(log_path: Path) -> int:
+    if not log_path.exists():
+        return 0
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+            if record.get("type") == "session_meta":
+                return int(record.get("command_count", 0))
+        except json.JSONDecodeError:
+            continue
+    return _count_command_records(log_path)
+
+
+def _count_command_records(log_path: Path) -> int:
+    if not log_path.exists():
+        return 0
+    count = 0
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            if json.loads(line).get("type") == "command":
+                count += 1
+        except json.JSONDecodeError:
+            continue
+    return count
 
 
 def _patch_session_meta(log_path: Path, end_time: str, command_count: int) -> None:
     """Read session.jsonl, update the session_meta record, rewrite."""
     if not log_path.exists():
         return
-    lines = log_path.read_text(encoding="utf-8").splitlines()
+    with JSONLWriter(log_path) as writer:
+        _patch_session_meta_file(writer._fh, end_time, command_count)
+
+
+def _patch_session_meta_file(fh, end_time: str, command_count: int) -> None:
+    """Patch session_meta in-place using an already-open a+ compatible handle."""
+    fh.flush()
+    fh.seek(0)
+    lines = fh.read().splitlines()
     updated = []
     for line in lines:
         line = line.strip()
@@ -256,7 +284,10 @@ def _patch_session_meta(log_path: Path, end_time: str, command_count: int) -> No
             record["end_time"] = end_time
             record["command_count"] = command_count
         updated.append(json.dumps(record, ensure_ascii=False))
-    log_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    fh.seek(0)
+    fh.truncate()
+    fh.write("\n".join(updated) + "\n")
+    fh.flush()
 
 
 def list_sessions() -> list[dict]:
