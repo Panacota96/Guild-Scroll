@@ -25,6 +25,7 @@ class LoadedSession:
     raw_io_paths: dict[int, Path] = field(default_factory=dict)
     timing_paths: dict[int, Path] = field(default_factory=dict)
     screenshots: list[ScreenshotEvent] = field(default_factory=list)
+    command_outputs: dict[tuple[int, int], str] = field(default_factory=dict)
 
 
 def resolve_session(name_or_current: Optional[str]) -> Path:
@@ -37,10 +38,19 @@ def resolve_session(name_or_current: Optional[str]) -> Path:
         name_or_current = os.environ.get("GUILD_SCROLL_SESSION")
     if not name_or_current:
         raise FileNotFoundError("No session name provided and GUILD_SCROLL_SESSION is not set.")
-    sess_dir = get_sessions_dir() / name_or_current
-    if not sess_dir.exists():
+
+    if "/" in name_or_current or "\\" in name_or_current or ".." in name_or_current:
         raise FileNotFoundError(f"Session not found: {name_or_current!r}")
-    return sess_dir
+
+    sessions_dir = get_sessions_dir().resolve()
+    if not sessions_dir.exists():
+        raise FileNotFoundError(f"Session not found: {name_or_current!r}")
+
+    for candidate in sessions_dir.iterdir():
+        if candidate.is_dir() and candidate.name == name_or_current:
+            return candidate.resolve()
+
+    raise FileNotFoundError(f"Session not found: {name_or_current!r}")
 
 
 def _parse_jsonl(log_file: Path) -> list[dict]:

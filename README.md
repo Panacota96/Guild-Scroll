@@ -41,7 +41,7 @@ gscroll export --format md   # structured report, ready to share
 | **Tool tagging** | 40+ security tools auto-classified as `recon` / `exploit` / `post-exploit` |
 | **MITRE ATT&CK** | Each tool mapped to a MITRE technique ID |
 | **Annotations** | Timestamped notes and tags, mid-session or post-session |
-| **Export** | Markdown report, self-contained HTML, asciicast v2 (`.cast`) |
+| **Export** | Markdown report, self-contained HTML, live web previews/downloads, asciicast v2 (`.cast`) |
 | **Search** | `gscroll search --tool nmap --phase recon --exit-code 0` |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
