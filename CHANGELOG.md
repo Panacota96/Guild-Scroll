@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.1] — 2026-04-02
+
+### Fixed
+
+- **JSONL corruption visibility** — `session_loader._parse_jsonl()` now warns when malformed JSONL lines are skipped and supports strict parsing that raises `ValueError` on the first bad line.
+
+---
+
 ## [0.4.0] — 2026-04-01
 
 ### Added

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -43,19 +44,36 @@ def resolve_session(name_or_current: Optional[str]) -> Path:
     return sess_dir
 
 
-def _parse_jsonl(log_file: Path) -> list[dict]:
-    """Read a JSONL file, return list of parsed dicts (skips invalid lines)."""
+def _session_name_from_log_file(log_file: Path) -> str:
+    """Infer the session name from a session log path."""
+    parts = log_file.parts
+    if PARTS_DIR_NAME in parts:
+        return parts[parts.index(PARTS_DIR_NAME) - 1]
+    return log_file.parts[-3]
+
+
+def _parse_jsonl(log_file: Path, strict: bool = False) -> list[dict]:
+    """Read a JSONL file, optionally failing fast on invalid lines."""
     if not log_file.exists():
         return []
     records = []
-    for line in log_file.read_text(encoding="utf-8").splitlines():
+    skipped_lines = 0
+    for line_number, line in enumerate(log_file.read_text(encoding="utf-8").splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
         try:
             records.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as exc:
+            if strict:
+                raise ValueError(f"Invalid JSONL in {log_file} at line {line_number}") from exc
+            skipped_lines += 1
+    if skipped_lines:
+        session_name = _session_name_from_log_file(log_file)
+        warnings.warn(
+            f"Session {session_name!r}: {skipped_lines} JSONL lines could not be parsed and were skipped",
+            stacklevel=2,
+        )
     return records
 
 
@@ -109,7 +127,7 @@ def _load_events_from_records(
     return meta, commands, assets, notes, screenshots
 
 
-def load_session(session_name: str) -> LoadedSession:
+def load_session(session_name: str, strict: bool = False) -> LoadedSession:
     """Load all events from session_name into a LoadedSession.
 
     Handles both single-part (legacy) and multi-part sessions.
@@ -119,7 +137,7 @@ def load_session(session_name: str) -> LoadedSession:
     log_file = sess_dir / "logs" / SESSION_LOG_NAME
 
     # Load part 1 (the main logs/ directory)
-    records = _parse_jsonl(log_file)
+    records = _parse_jsonl(log_file, strict=strict)
     meta, commands, assets, notes, screenshots = _load_events_from_records(records, part=1)
 
     parts: list[int] = [1]
@@ -136,7 +154,7 @@ def load_session(session_name: str) -> LoadedSession:
         for part_dir in part_dirs:
             part_num = int(part_dir.name)
             part_log = part_dir / "logs" / SESSION_LOG_NAME
-            part_records = _parse_jsonl(part_log)
+            part_records = _parse_jsonl(part_log, strict=strict)
             _, part_cmds, part_assets, part_notes, part_screenshots = _load_events_from_records(
                 part_records, part=part_num
             )
