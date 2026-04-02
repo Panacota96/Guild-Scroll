@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.5.0-green)
+![Version](https://img.shields.io/badge/version-0.6.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -172,6 +172,10 @@ gscroll export --format md
 gscroll export --format html -o report.html
 gscroll export --format cast          # asciicast (asciinema-compatible)
 
+# Structured CPTS-style writeup reports
+gscroll export --format md --writeup                    # Markdown writeup with all sections
+gscroll export --format html --writeup -o report.html  # Responsive HTML writeup
+
 # Replay
 gscroll replay
 gscroll replay --speed 2.0
@@ -201,7 +205,32 @@ gscroll update
 
 ---
 
-## Tech Stack
+## Writeup Workflow
+
+`--writeup` generates a structured, client-facing pentest report aligned with CPTS-style outputs:
+
+```bash
+# Markdown writeup — all sections, ready to fill in findings
+gscroll export htb-machine --format md --writeup
+
+# Self-contained HTML writeup — responsive layout, desktop and mobile
+gscroll export htb-machine --format html --writeup -o report.html
+```
+
+Both formats include:
+
+| Section | Content |
+|---|---|
+| **Executive Summary** | Approach, Scope table, Assessment overview |
+| **Assessment Summary** | Command counts and tools-used table |
+| **Walkthrough** | Step-by-step narrative (first 15 commands) |
+| **Reproducibility Steps** | Full command sequence for customer replay |
+| **Rabbit Holes / Dead Ends** | Commands with non-zero exit codes |
+| **Findings** | Full command table with phase tags |
+| **Remediation** | Short-, medium-, and long-term priorities |
+| **Appendix** | Notes and captured command output evidence |
+
+
 
 | Area | Implementation |
 |---|---|
