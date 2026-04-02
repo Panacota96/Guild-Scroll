@@ -1,7 +1,8 @@
 """
 Click CLI: gscroll start | list | status | note | export | replay | search | tui | update
-           join | share | import
+           join | share | import | serve
 """
+import errno
 import sys
 import click
 
@@ -17,6 +18,7 @@ from guild_scroll import __version__
         "  gscroll export htb-machine --format md\n"
         "  gscroll export --format html -o report.html  # inside a session\n"
         "  gscroll search htb-machine --phase recon --exit-code 0\n"
+        "  gscroll validate htb-machine --repair\n"
         "  gscroll replay htb-machine --speed 2\n"
         "\n"
         "Run 'gscroll COMMAND --help' for per-command options and examples."
@@ -30,6 +32,44 @@ def cli():
     security tools (nmap, sqlmap, linpeas …), exports to Markdown/HTML/
     asciicast, and provides search and replay.
     """
+
+
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll validate htb-machine\n"
+        "  gscroll validate htb-machine --repair\n"
+        "\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll validate\n"
+    )
+)
+@click.argument("session_name", required=False, default=None)
+@click.option(
+    "--repair", is_flag=True,
+    help="Patch repairable session_meta fields before re-validating.",
+)
+def validate(session_name, repair):
+    """Validate the integrity of a recorded session."""
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.validator import repair_session, validate_session
+
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    repair_report = repair_session(sess_dir) if repair else None
+    report = validate_session(sess_dir)
+    if repair_report is not None:
+        report.repaired = repair_report.repaired + report.repaired
+        report.info = repair_report.info + report.info
+
+    click.echo(report.format())
+    if report.errors:
+        sys.exit(1)
 
 
 @cli.command(
@@ -397,6 +437,29 @@ def tui(session_name):
 
 
 @cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll serve\n"
+        "  gscroll serve --port 1551\n"
+        "\n"
+        "Serves the report UI on localhost only."
+    )
+)
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind.")
+@click.option("--port", default=1551, show_default=True, type=int, help="Port to bind.")
+def serve(host, port):
+    """Launch the local web report server."""
+    from guild_scroll.web.app import run_server
+
+    try:
+        run_server(host=host, port=port)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
+@cli.command(
     name="join",
     epilog=(
         "\b\n"
@@ -424,11 +487,48 @@ def join(session_name):
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
-    merged = merge_parts(sess_dir.name)
+    try:
+        merged = merge_parts(sess_dir.name)
+    except (FileExistsError, OSError, ValueError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
     click.echo(
-        f"[gscroll] Merged {len(merged.parts)} parts into '{sess_dir.name}' "
+        f"[gscroll] Merged {merged.meta.parts_count} parts into '{sess_dir.name}' "
         f"({len(merged.commands)} commands total)."
     )
+
+
+@cli.command(
+    name="restore",
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll restore htb-machine\n"
+        "  gscroll restore              # auto-detects session from GUILD_SCROLL_SESSION\n"
+        "\n"
+        "Restores parts/ from parts.backup/ after a failed merge."
+    )
+)
+@click.argument("session_name", required=False, default=None)
+def restore(session_name):
+    """Restore a session's parts/ directory from parts.backup/."""
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.merge import restore_parts_backup
+
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    try:
+        restore_parts_backup(sess_dir.name)
+    except (FileNotFoundError, FileExistsError, OSError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"[gscroll] Restored parts backup for '{sess_dir.name}'.")
 
 
 @cli.command(
@@ -487,6 +587,49 @@ def import_session(archive_path):
         sys.exit(1)
 
     click.echo(f"[gscroll] Imported session '{name}'.")
+
+
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll serve\n"
+        "  gscroll serve --port 1661\n"
+        "\n"
+        "The web UI is intentionally localhost-only and does not provide auth.\n"
+    )
+)
+@click.option(
+    "--host", default="127.0.0.1", show_default=True, metavar="HOST",
+    help="Bind host. Only 127.0.0.1 is allowed.",
+)
+@click.option(
+    "--port", default=1551, show_default=True, type=int, metavar="PORT",
+    help="Bind port for the local web server.",
+)
+def serve(host, port):
+    """Serve a localhost-only session viewer and JSON API."""
+    from guild_scroll.web import create_server
+
+    try:
+        server = create_server(host=host, port=port)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            click.echo(f"Error: Port {port} already in use.", err=True)
+            sys.exit(1)
+        click.echo(f"Error starting server: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"[gscroll] Serving on http://{host}:{server.server_port} (Ctrl-C to stop)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("[gscroll] Server stopped.")
+    finally:
+        server.server_close()
 
 
 @cli.command(
