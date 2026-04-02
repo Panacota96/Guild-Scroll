@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.7.0] — 2026-04-02
+
+### Added
+
+- **Cyberpunk + medieval fantasy homepage redesign** — `GET /` now renders a fully themed card-based layout with a hero band, CSS variables (`--bg-void`, `--rune-amber`, `--hover-core`), `auto-fit` grid, hover-glow via CSS transitions, and a `@keyframes rise` fade-in animation ≤420 ms (`web/app.py`).
+- **Empty state panel** — When no sessions exist the grid displays an `empty-state` article card with a prompt to start a new recording.
+- **Responsive layout** — `@media (max-width: 700px)` collapses the card grid to a single column and scales hero text for ≥360 px viewports.
+- **Page `<title>` updated** — Browser tab and bookmark label now reads `Guild Scroll Session Codex`.
+- **4 new acceptance tests in `TestIndexPage`** — coverage for CSS variable presence, grid auto-fit declaration, empty-state rendering, and responsive media query (`tests/test_web.py`).
+
+---
+
 ## [0.6.0] — 2026-04-02
 
 ### Added
