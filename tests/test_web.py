@@ -5,7 +5,6 @@ from urllib.request import Request, urlopen
 from guild_scroll.config import RAW_IO_LOG_NAME, get_sessions_dir
 from guild_scroll.log_schema import CommandEvent, SessionMeta
 from guild_scroll.log_writer import JSONLWriter
-from guild_scroll.utils import iso_timestamp
 from guild_scroll.web.app import create_server
 
 

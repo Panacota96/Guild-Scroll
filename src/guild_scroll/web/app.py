@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import tempfile
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,13 +11,13 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 from guild_scroll.exporters.html import export_html
 from guild_scroll.exporters.markdown import export_markdown
-from guild_scroll.exporters.output_extractor import (
-    extract_command_outputs,
-    extract_command_outputs_multipart,
-)
+from guild_scroll.exporters.output_extractor import build_command_output_map
 from guild_scroll.search import SearchFilter, search_commands
 from guild_scroll.session import list_sessions
 from guild_scroll.session_loader import LoadedSession, load_session
+
+
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _is_safe_session_name(name: str) -> bool:
@@ -58,28 +59,9 @@ def _active_filter_params(filters: SearchFilter) -> dict[str, str]:
     return active
 
 
-def _extract_output_map(session: LoadedSession) -> dict[tuple[int, int], str]:
-    if session.raw_io_paths:
-        part_outputs = extract_command_outputs_multipart(session.raw_io_paths)
-    else:
-        legacy_path = session.session_dir / "logs" / "raw_io.log"
-        part_outputs = {1: extract_command_outputs(legacy_path)}
-
-    commands_by_part: dict[int, list] = {}
-    for command in session.commands:
-        commands_by_part.setdefault(command.part, []).append(command)
-
-    output_map: dict[tuple[int, int], str] = {}
-    for part, commands in commands_by_part.items():
-        outputs = part_outputs.get(part, [])
-        for index, command in enumerate(commands):
-            output_map[(command.part, command.seq)] = outputs[index] if index < len(outputs) else ""
-    return output_map
-
-
 def _filtered_session(session: LoadedSession, filters: SearchFilter) -> LoadedSession:
     commands = search_commands(session, filters) if any(asdict(filters).values()) else list(session.commands)
-    output_map = _extract_output_map(session)
+    output_map = build_command_output_map(session)
     return LoadedSession(
         meta=session.meta,
         commands=commands,
@@ -109,9 +91,14 @@ def _render_export(session: LoadedSession, fmt: str) -> str:
         return output.read_text(encoding="utf-8")
 
 
+def _download_filename(session_name: str, fmt: str) -> str:
+    safe_name = _SAFE_FILENAME_RE.sub("_", Path(session_name).name)
+    safe_name = safe_name.strip("._") or "session"
+    return f"{safe_name}.{fmt}"
+
+
 def _render_session_page(session: LoadedSession, preview_format: str, filters: SearchFilter) -> str:
     filter_params = _active_filter_params(filters)
-    preview_query = urlencode({"format": preview_format, **filter_params})
     html_query = urlencode({"format": "html", **filter_params})
     md_query = urlencode({"format": "md", **filter_params})
     html_report = _render_export(session, "html")
@@ -151,7 +138,6 @@ a {{ color: #8cc8ff; }}
   <a href="/session/{session_name}?{md_query}">Markdown preview</a>
   <a href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
   <a href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
-  <a href="/api/session/{session_name}/report?{preview_query}">API report metadata</a>
 </div>
 {preview_markup}
 </body>
@@ -280,9 +266,7 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         self._send_bytes(
             content.encode("utf-8"),
             content_type=mime_type,
-            extra_headers={
-                "Content-Disposition": f'attachment; filename="{session.meta.session_name}.{fmt}"',
-            },
+            download_name=_download_filename(session.session_dir.name, fmt),
         )
 
     def _handle_session_page(self, raw_name: str, params: dict[str, list[str]]) -> None:
@@ -339,19 +323,20 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         *,
         status: int = 200,
         content_type: str,
-        extra_headers: dict[str, str] | None = None,
+        download_name: str | None = None,
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("X-Content-Type-Options", "nosniff")
-        for key, value in (extra_headers or {}).items():
-            self.send_header(key, value)
+        if download_name is not None:
+            self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
         self.end_headers()
         self.wfile.write(content)
 
 
 def create_server(host: str = "127.0.0.1", port: int = 1551) -> ThreadingHTTPServer:
+    """Create a localhost-only report server."""
     if host != "127.0.0.1":
         raise ValueError("gscroll serve only supports 127.0.0.1 for safety.")
     return ThreadingHTTPServer((host, port), GuildScrollRequestHandler)
