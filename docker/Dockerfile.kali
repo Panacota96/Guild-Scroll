@@ -30,7 +30,6 @@ RUN apt-get update && apt-get upgrade -y && \
     telnet \
     traceroute \
     whois \
-    dig \
     socat \
     tcpdump \
     && rm -rf /var/lib/apt/lists/*
