@@ -343,3 +343,79 @@ class TestReplayCommand:
         runner = CliRunner()
         result = runner.invoke(cli, ["replay"])
         assert result.exit_code != 0
+
+
+class TestValidateCommand:
+    def test_validate_missing_session_errors(self, isolated_sessions_dir):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["validate", "missing-session"])
+        assert result.exit_code != 0
+        assert "Session not found" in result.output
+
+    def test_validate_healthy_session(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
+
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir = sessions_dir / "valid-sess" / "logs"
+        logs_dir.mkdir(parents=True)
+        meta = SessionMeta(
+            session_name="valid-sess",
+            session_id="abc",
+            start_time="2026-04-02T13:00:00Z",
+            end_time="2026-04-02T13:00:10Z",
+            hostname="kali",
+            command_count=1,
+        )
+        command = CommandEvent(
+            seq=1,
+            command="id",
+            timestamp_start="2026-04-02T13:00:05Z",
+            timestamp_end="2026-04-02T13:00:10Z",
+            exit_code=0,
+            working_directory="/home/kali",
+        )
+        with JSONLWriter(logs_dir / SESSION_LOG_NAME) as writer:
+            writer.write(meta.to_dict())
+            writer.write(command.to_dict())
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["validate", "valid-sess"])
+        assert result.exit_code == 0
+        assert "+ info: checked 1 log file(s)" in result.output
+        assert "- error:" not in result.output
+
+    def test_validate_repair_updates_meta(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
+
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir = sessions_dir / "repair-cli" / "logs"
+        logs_dir.mkdir(parents=True)
+        meta = SessionMeta(
+            session_name="repair-cli",
+            session_id="abc",
+            start_time="2026-04-02T13:30:00Z",
+            hostname="kali",
+            command_count=0,
+        )
+        command = CommandEvent(
+            seq=1,
+            command="whoami",
+            timestamp_start="2026-04-02T13:30:02Z",
+            timestamp_end="2026-04-02T13:30:03Z",
+            exit_code=0,
+            working_directory="/home/kali",
+        )
+        with JSONLWriter(logs_dir / SESSION_LOG_NAME) as writer:
+            writer.write(meta.to_dict())
+            writer.write(command.to_dict())
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["validate", "repair-cli", "--repair"])
+
+        repaired_meta = json.loads((logs_dir / SESSION_LOG_NAME).read_text().splitlines()[0])
+        assert result.exit_code == 0
+        assert "+ repaired:" in result.output
+        assert repaired_meta["command_count"] == 1
+        assert repaired_meta["end_time"] == "2026-04-02T13:30:03Z"

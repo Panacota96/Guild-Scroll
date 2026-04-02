@@ -43,6 +43,7 @@ gscroll export --format md   # structured report, ready to share
 | **Annotations** | Timestamped notes and tags, mid-session or post-session |
 | **Export** | Markdown report, self-contained HTML, live web previews/downloads, asciicast v2 (`.cast`) |
 | **Search** | `gscroll search --tool nmap --phase recon --exit-code 0` |
+| **Validation** | `gscroll validate [SESSION] --repair` checks JSONL/assets/parts and patches repairable metadata |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
 | **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API |
@@ -160,6 +161,9 @@ gscroll note "found open port 80 — Apache 2.4" --tag recon
 # Search commands
 gscroll search --phase recon
 gscroll search --tool nmap --exit-code 0
+
+# Validate integrity and repair session metadata
+gscroll validate htb-machine --repair
 
 # Export
 gscroll export --format md

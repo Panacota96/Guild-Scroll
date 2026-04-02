@@ -18,6 +18,7 @@ from guild_scroll import __version__
         "  gscroll export htb-machine --format md\n"
         "  gscroll export --format html -o report.html  # inside a session\n"
         "  gscroll search htb-machine --phase recon --exit-code 0\n"
+        "  gscroll validate htb-machine --repair\n"
         "  gscroll replay htb-machine --speed 2\n"
         "\n"
         "Run 'gscroll COMMAND --help' for per-command options and examples."
@@ -31,6 +32,44 @@ def cli():
     security tools (nmap, sqlmap, linpeas …), exports to Markdown/HTML/
     asciicast, and provides search and replay.
     """
+
+
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll validate htb-machine\n"
+        "  gscroll validate htb-machine --repair\n"
+        "\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll validate\n"
+    )
+)
+@click.argument("session_name", required=False, default=None)
+@click.option(
+    "--repair", is_flag=True,
+    help="Patch repairable session_meta fields before re-validating.",
+)
+def validate(session_name, repair):
+    """Validate the integrity of a recorded session."""
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.validator import repair_session, validate_session
+
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    repair_report = repair_session(sess_dir) if repair else None
+    report = validate_session(sess_dir)
+    if repair_report is not None:
+        report.repaired = repair_report.repaired + report.repaired
+        report.info = repair_report.info + report.info
+
+    click.echo(report.format())
+    if report.errors:
+        sys.exit(1)
 
 
 @cli.command(
