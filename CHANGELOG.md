@@ -10,11 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ### Added
 
-- **Per-event HMAC-SHA256 integrity fields** — every `command`, `note`, `asset`, and `screenshot` event written to a session log now carries an `event_hmac` field (HMAC-SHA256 hex digest) when a session key is present (`integrity.py`).
-- **Session key generation** — `gscroll start` generates a 32-byte random key stored in `{session_dir}/session.key` (mode 0o600); the key is used by all subsequent write operations for that session (`integrity.py`, `session.py`).
-- **Integrity verification in `gscroll validate`** — `validator.py` loads `session.key` and checks every signed event; HMAC mismatches are reported as errors; missing keys with signed events produce a warning rather than an error (backward compatibility).
-- **Backward compatibility** — sessions created without a key (pre-0.7.0) validate cleanly; the `event_hmac` field is omitted from the JSONL when no key is active.
-- **28 new tests** covering key generation/loading, HMAC computation/verification, tamper detection, JSONLWriter injection, schema field roundtrip, and validator chain checks (`tests/test_integrity.py`).
+- **Operator metadata in SessionMeta** — `SessionMeta` now includes an `operator: Optional[str]` field auto-populated from the `USER`, `LOGNAME`, or `USERNAME` environment variable at session start (`log_schema.py`, `session.py`).
+- **Operator propagated to exports** — Markdown, HTML, and Obsidian exporters render the operator identity when present; the field also travels with session archives (`exporters/markdown.py`, `exporters/html.py`, `exporters/obsidian.py`).
+- **Operator tests** — tests cover metadata roundtrip, detection priority, and rendering in all three export formats (`tests/test_log_schema.py`, `tests/test_session.py`, `tests/test_export_markdown.py`, `tests/test_export_html.py`, `tests/test_export_obsidian.py`).
+- **README operator metadata note** — JSONL event table and a callout block document the operator field and its auto-detection source.
 
 ---
 

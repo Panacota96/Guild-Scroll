@@ -44,6 +44,8 @@ gscroll export --format md   # structured report, ready to share
 | **Export** | Markdown report, self-contained HTML, live web previews/downloads, asciicast v2 (`.cast`) |
 | **Search** | `gscroll search --tool nmap --phase recon --exit-code 0 --output-contains 'open'` |
 | **Validation** | `gscroll validate [SESSION] --repair` checks JSONL/assets/parts and patches repairable metadata |
+| **Signing** | `gscroll sign [SESSION] [--key KEYFILE]` creates a chain-of-trust signature (`session.sig`) |
+| **Verification** | `gscroll verify [SESSION] [--key KEYFILE]` verifies integrity; exits non-zero on mismatch |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
 | **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API |
@@ -166,6 +168,16 @@ gscroll search --tool nmap --output-contains "open"
 
 # Validate integrity and repair session metadata
 gscroll validate htb-machine --repair
+
+# Sign a session (SHA-256 integrity baseline)
+gscroll sign htb-machine
+
+# Sign with a shared-secret key (HMAC-SHA256, for operator workflows / CI)
+gscroll sign htb-machine --key operator.key
+
+# Verify before sharing/reporting
+gscroll verify htb-machine
+gscroll verify htb-machine --key operator.key   # exits 1 on mismatch
 
 # Export
 gscroll export --format md
@@ -298,10 +310,12 @@ Override the base path with `GUILD_SCROLL_DIR`.
 
 | Type | Key Fields |
 |---|---|
-| `session_meta` | `session_name`, `session_id`, `start_time`, `hostname`, `end_time`, `command_count` |
+| `session_meta` | `session_name`, `session_id`, `start_time`, `hostname`, `end_time`, `command_count`, `operator` (optional) |
 | `command` | `seq`, `command`, `timestamp_start`, `timestamp_end`, `exit_code`, `working_directory` |
 | `asset` | `seq`, `trigger_command`, `asset_type`, `captured_path`, `original_path`, `timestamp` |
 | `note` | `text`, `timestamp`, `tags` |
+
+> **Operator metadata:** The `operator` field in `session_meta` is auto-populated from the `USER`, `LOGNAME`, or `USERNAME` environment variable when a session starts. It is included in Markdown, HTML, and Obsidian exports and travels with the session archive.
 
 ---
 

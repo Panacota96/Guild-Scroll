@@ -646,6 +646,106 @@ def serve(host, port):
 
 
 @cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll sign htb-machine               # SHA-256 digest (no key)\n"
+        "  gscroll sign htb-machine --key op.key  # HMAC-SHA256 with key file\n"
+        "\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll sign\n"
+    )
+)
+@click.argument("session_name", required=False, default=None)
+@click.option(
+    "--key", "key_file", default=None, metavar="KEYFILE",
+    help="Path to a key file for HMAC-SHA256 signing. Omit for plain SHA-256.",
+)
+def sign(session_name, key_file):
+    """Sign a session to establish a chain-of-trust baseline.
+
+    Computes a digest over the session log and writes ``logs/session.sig``
+    containing the algorithm, digest, timestamp, and operator.
+
+    Use --key to produce an HMAC-SHA256 signature instead of a plain SHA-256
+    digest for authenticated integrity checks.
+    """
+    from pathlib import Path
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.signer import sign_session
+
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    key_path = Path(key_file) if key_file else None
+    if key_path is not None and not key_path.exists():
+        click.echo(f"Error: key file not found: {key_path}", err=True)
+        sys.exit(1)
+
+    try:
+        metadata = sign_session(sess_dir, key_file=key_path)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"[gscroll] Session '{sess_dir.name}' signed.")
+    click.echo(f"  algorithm : {metadata.algorithm}")
+    click.echo(f"  digest    : {metadata.digest}")
+    click.echo(f"  operator  : {metadata.operator}")
+    click.echo(f"  timestamp : {metadata.timestamp}")
+    click.echo(f"  sig file  : {sess_dir / 'logs' / 'session.sig'}")
+
+
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll verify htb-machine               # verify SHA-256 digest\n"
+        "  gscroll verify htb-machine --key op.key  # verify HMAC-SHA256\n"
+        "\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll verify\n"
+        "\n"
+        "Exits with status 1 when the signature is missing or does not match."
+    )
+)
+@click.argument("session_name", required=False, default=None)
+@click.option(
+    "--key", "key_file", default=None, metavar="KEYFILE",
+    help="Path to the key file used when signing. Required for HMAC-SHA256 signatures.",
+)
+def verify(session_name, key_file):
+    """Verify a session's signature.
+
+    Recomputes the digest and compares it against the stored ``logs/session.sig``.
+    Exits with status 1 when the signature is missing, invalid, or does not match.
+    Designed for use in CI and operator workflows.
+    """
+    from pathlib import Path
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.signer import verify_session
+
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    key_path = Path(key_file) if key_file else None
+    if key_path is not None and not key_path.exists():
+        click.echo(f"Error: key file not found: {key_path}", err=True)
+        sys.exit(1)
+
+    ok, message = verify_session(sess_dir, key_file=key_path)
+    click.echo(f"[gscroll] {message}")
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(
     epilog="\b\nExample:\n  gscroll update\n",
 )
 def update():

@@ -69,6 +69,23 @@ class TestExportHtml:
         content = out.read_text()
         assert "<!DOCTYPE html>" in content
 
+    def test_operator_included_when_present(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.operator = "david"
+        out = tmp_path / "op.html"
+        export_html(session, out)
+        content = out.read_text()
+        assert "Operator" in content
+        assert "david" in content
+
+    def test_operator_omitted_when_absent(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.operator = None
+        out = tmp_path / "noop.html"
+        export_html(session, out)
+        content = out.read_text()
+        assert "Operator" not in content
+
 
 class TestExportHtmlWriteup:
     def test_writeup_is_valid_html(self, tmp_path):

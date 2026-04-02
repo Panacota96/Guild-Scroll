@@ -262,6 +262,33 @@ class TestIndexPage:
         assert '<time onmouseover="x">' not in content
         assert "host<script>" not in content
 
+    def test_page_has_themed_css_variables(self):
+        content = _render_index_page([])
+        assert "--bg-void" in content
+        assert "--rune-amber" in content
+        assert "--hover-core" in content
+
+    def test_page_has_grid_with_auto_fit(self):
+        content = _render_index_page([])
+        assert 'class="grid"' in content
+        assert "auto-fit" in content
+
+    def test_page_renders_empty_state_when_no_sessions(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/")
+
+        content = body.decode("utf-8")
+        assert status == 200
+        assert "No sessions found" in content
+        assert "empty-state" in content
+
+    def test_page_has_responsive_media_query(self):
+        content = _render_index_page([])
+        assert "@media (max-width: 700px)" in content
+
 
 class TestDiscoveriesApi:
     def test_returns_notes_and_assets_newest_first(self, isolated_sessions_dir):
