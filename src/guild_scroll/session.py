@@ -15,8 +15,9 @@ from guild_scroll.config import (
     RAW_IO_LOG_NAME,
     HOOK_EVENTS_NAME,
     SESSION_LOG_NAME,
+    PARTS_DIR_NAME,
 )
-from guild_scroll.hooks import create_zdotdir
+from guild_scroll.hooks import create_hook_dir, detect_shell
 from guild_scroll.log_schema import SessionMeta, CommandEvent, AssetEvent
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.recorder import start_recording
@@ -27,15 +28,25 @@ def _session_dir(session_name: str) -> Path:
     return get_sessions_dir() / session_name
 
 
-def start_session(raw_name: str) -> None:
+def start_session(raw_name: str, join: bool = False) -> None:
     """
     Create the session directory tree, inject hooks, launch script, finalize.
     Blocks until the user types `exit` or Ctrl-D.
+
+    If join=True, attach to an existing session as a new numbered part.
     """
     name = sanitize_session_name(raw_name)
-    session_id = generate_session_id()
     sess_dir = _session_dir(name)
 
+    if join:
+        # Joining an existing session as a new part
+        if not sess_dir.exists():
+            raise FileNotFoundError(f"Session not found: {name!r}. Cannot join a non-existent session.")
+        _start_part(name, sess_dir)
+        return
+
+    # Normal new session start
+    session_id = generate_session_id()
     # Handle name collisions
     if sess_dir.exists():
         name = f"{name}-{session_id}"
@@ -51,8 +62,12 @@ def start_session(raw_name: str) -> None:
     timing_path = logs_dir / TIMING_LOG_NAME
     hook_events_path = logs_dir / HOOK_EVENTS_NAME
 
-    # Create ZDOTDIR temp dir
-    zdotdir = create_zdotdir(hook_events_path, MAX_ASSET_SIZE_BYTES, session_name=name)
+    # Detect shell and platform
+    shell = detect_shell()
+    platform = _detect_platform_safe()
+
+    # Create hook dir for detected shell
+    hook_dir, shell = create_hook_dir(hook_events_path, MAX_ASSET_SIZE_BYTES, session_name=name, shell=shell)
 
     # Write session_meta start record
     meta = SessionMeta(
@@ -60,6 +75,7 @@ def start_session(raw_name: str) -> None:
         session_id=session_id,
         start_time=iso_timestamp(),
         hostname=socket.gethostname(),
+        platform=platform,
     )
     final_log = logs_dir / SESSION_LOG_NAME
     writer = JSONLWriter(final_log)
@@ -67,12 +83,65 @@ def start_session(raw_name: str) -> None:
     writer.close()
 
     try:
-        start_recording(raw_io_path, timing_path, zdotdir, hook_events_path, session_name=name)
+        start_recording(raw_io_path, timing_path, hook_dir, hook_events_path, session_name=name, shell=shell)
     finally:
-        # Always finalize, even if recording crashed
         finalize_session(name, session_id, logs_dir, assets_dir)
-        # Clean up temp ZDOTDIR
-        shutil.rmtree(str(zdotdir), ignore_errors=True)
+        shutil.rmtree(str(hook_dir), ignore_errors=True)
+
+
+def _start_part(session_name: str, sess_dir: Path) -> None:
+    """Start a new terminal part attached to an existing session."""
+    parts_dir = sess_dir / PARTS_DIR_NAME
+    parts_dir.mkdir(exist_ok=True)
+
+    # Determine next part number (existing logs/ counts as part 1)
+    existing_parts = [p for p in parts_dir.iterdir() if p.is_dir() and p.name.isdigit()] if parts_dir.exists() else []
+    next_part = len(existing_parts) + 2  # part 1 is logs/, so next is 2+
+
+    part_logs_dir = parts_dir / str(next_part) / "logs"
+    part_assets_dir = parts_dir / str(next_part) / "assets"
+    for d in (part_logs_dir, part_assets_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    raw_io_path = part_logs_dir / RAW_IO_LOG_NAME
+    timing_path = part_logs_dir / TIMING_LOG_NAME
+    hook_events_path = part_logs_dir / HOOK_EVENTS_NAME
+
+    shell = detect_shell()
+    hook_dir, shell = create_hook_dir(hook_events_path, MAX_ASSET_SIZE_BYTES, session_name=session_name, shell=shell)
+
+    # Write a minimal session_meta for this part
+    part_meta = SessionMeta(
+        session_name=session_name,
+        session_id=generate_session_id(),
+        start_time=iso_timestamp(),
+        hostname=socket.gethostname(),
+    )
+    part_log = part_logs_dir / SESSION_LOG_NAME
+    writer = JSONLWriter(part_log)
+    writer.write(part_meta.to_dict())
+    writer.close()
+
+    env_part = str(next_part)
+    try:
+        import subprocess as _sp
+        import copy
+        env = copy.copy(os.environ)
+        env["GUILD_SCROLL_SESSION_PART"] = env_part
+        # start_recording sets GUILD_SCROLL_SESSION; pass session_name
+        start_recording(raw_io_path, timing_path, hook_dir, hook_events_path, session_name=session_name, shell=shell)
+    finally:
+        finalize_session(session_name, part_meta.session_id, part_logs_dir, part_assets_dir, part=next_part)
+        shutil.rmtree(str(hook_dir), ignore_errors=True)
+
+
+def _detect_platform_safe() -> Optional[str]:
+    """Call detect_platform(), return None on any error."""
+    try:
+        from guild_scroll.platform_detect import detect_platform
+        return detect_platform()
+    except Exception:
+        return None
 
 
 def finalize_session(
@@ -80,6 +149,7 @@ def finalize_session(
     session_id: str,
     logs_dir: Path,
     assets_dir: Path,
+    part: int = 1,
 ) -> None:
     """
     Merge hook events into the final session.jsonl.
@@ -107,6 +177,8 @@ def finalize_session(
         etype = evt.get("type")
         if etype == "command":
             try:
+                # Inject part number
+                evt["part"] = part
                 cmd_event = CommandEvent.from_dict(evt)
                 writer.write(cmd_event.to_dict())
                 command_count += 1
@@ -120,15 +192,14 @@ def finalize_session(
                     asset_event = AssetEvent(
                         seq=evt.get("seq", 0),
                         trigger_command=evt.get("trigger_command", ""),
-                        asset_type="download",  # generic; refine in M2
+                        asset_type="download",
                         captured_path=str(dest.relative_to(assets_dir.parent)),
                         original_path=str(original_path),
                         timestamp=evt.get("timestamp", iso_timestamp()),
+                        part=part,
                     )
                     writer.write(asset_event.to_dict())
 
-    # Update session_meta with end_time and command_count
-    # Rewrite the whole file: read existing records, patch meta, rewrite
     writer.close()
     _patch_session_meta(final_log, iso_timestamp(), command_count)
 

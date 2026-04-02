@@ -18,6 +18,8 @@ class SessionMeta:
     type: str = field(default="session_meta", init=False)
     end_time: Optional[str] = None
     command_count: int = 0
+    parts_count: int = 1
+    platform: Optional[str] = None  # "htb" | "thm" | None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -40,6 +42,7 @@ class CommandEvent:
     exit_code: int
     working_directory: str
     type: str = field(default="command", init=False)
+    part: int = 1  # which terminal part this command came from
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -61,6 +64,7 @@ class AssetEvent:
     original_path: str       # where the file appeared
     timestamp: str
     type: str = field(default="asset", init=False)
+    part: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -79,6 +83,7 @@ class NoteEvent:
     timestamp: str
     tags: list[str] = field(default_factory=list)
     type: str = field(default="note", init=False)
+    part: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -86,6 +91,26 @@ class NoteEvent:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> NoteEvent:
+        d = dict(d)
+        d.pop("type", None)
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class ScreenshotEvent:
+    seq: int
+    event_type: str          # "flag" | "root_shell"
+    trigger_command: str
+    screenshot_path: Optional[str] = None  # relative to session dir, None if capture failed
+    timestamp: str = ""
+    type: str = field(default="screenshot", init=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        return {"type": d.pop("type"), **d}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ScreenshotEvent:
         d = dict(d)
         d.pop("type", None)
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})

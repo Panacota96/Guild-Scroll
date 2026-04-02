@@ -27,11 +27,14 @@ def compute_phase_timeline(session: LoadedSession) -> list[PhaseSpan]:
     if not session.commands:
         return []
 
+    # Sort by timestamp to ensure correct phase grouping across multi-part sessions
+    sorted_commands = sorted(session.commands, key=lambda c: c.timestamp_start)
+
     spans: list[PhaseSpan] = []
     current_phase: Optional[str] = None
     current_span: Optional[PhaseSpan] = None
 
-    for cmd in session.commands:
+    for cmd in sorted_commands:
         phase = tag_command(cmd.command) or "unknown"
         if phase != current_phase:
             current_phase = phase

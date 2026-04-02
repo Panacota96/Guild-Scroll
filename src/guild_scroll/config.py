@@ -22,6 +22,9 @@ RAW_IO_LOG_NAME = "raw_io.log"
 HOOK_EVENTS_NAME = ".hook_events.jsonl"
 SESSION_LOG_NAME = "session.jsonl"
 
+# Multi-session parts directory
+PARTS_DIR_NAME = "parts"
+
 GITHUB_RAW_VERSION_URL = (
     "https://raw.githubusercontent.com/Panacota96/Guild-Scroll/main/"
     "src/guild_scroll/__init__.py"

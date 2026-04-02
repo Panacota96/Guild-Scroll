@@ -16,6 +16,7 @@ class SearchFilter:
     phase: Optional[str] = None
     exit_code: Optional[int] = None
     cwd: Optional[str] = None
+    part: Optional[int] = None
 
 
 def search_commands(session: LoadedSession, filters: SearchFilter) -> list[CommandEvent]:
@@ -36,6 +37,9 @@ def search_commands(session: LoadedSession, filters: SearchFilter) -> list[Comma
                 continue
         if filters.cwd is not None:
             if filters.cwd not in cmd.working_directory:
+                continue
+        if filters.part is not None:
+            if cmd.part != filters.part:
                 continue
         results.append(cmd)
     return results

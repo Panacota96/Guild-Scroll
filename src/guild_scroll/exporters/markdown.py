@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from guild_scroll.config import RAW_IO_LOG_NAME
-from guild_scroll.exporters.output_extractor import extract_command_outputs
+from guild_scroll.exporters.output_extractor import extract_command_outputs, extract_command_outputs_multipart
 from guild_scroll.session_loader import LoadedSession
 from guild_scroll.tool_tagger import tag_command
 
@@ -61,34 +61,53 @@ def export_markdown(session: LoadedSession, output: Path) -> None:
     lines.append("")
 
     # Timeline table
+    multipart = len(session.parts) > 1
     lines.append("## Timeline")
-    lines.append("| # | Time | Command | Exit | Dir | Tag |")
-    lines.append("|---|------|---------|------|-----|-----|")
+    if multipart:
+        lines.append("| # | Time | Command | Exit | Dir | Tag | Part |")
+        lines.append("|---|------|---------|------|-----|-----|------|")
+    else:
+        lines.append("| # | Time | Command | Exit | Dir | Tag |")
+        lines.append("|---|------|---------|------|-----|-----|")
     for cmd in session.commands:
         rel = _relative(start_dt, cmd.timestamp_start)
         tag = tag_command(cmd.command) or "—"
-        # Escape pipe characters in command
         command_cell = f"`{cmd.command.replace('|', '\\|')}`"
         cwd = cmd.working_directory or "—"
-        lines.append(
-            f"| {cmd.seq} | {rel} | {command_cell} | {cmd.exit_code} | {cwd} | {tag} |"
-        )
+        if multipart:
+            lines.append(
+                f"| {cmd.seq} | {rel} | {command_cell} | {cmd.exit_code} | {cwd} | {tag} | {cmd.part} |"
+            )
+        else:
+            lines.append(
+                f"| {cmd.seq} | {rel} | {command_cell} | {cmd.exit_code} | {cwd} | {tag} |"
+            )
     lines.append("")
 
-    # Command details with output
-    raw_io_path = session.session_dir / "logs" / RAW_IO_LOG_NAME
-    outputs = extract_command_outputs(raw_io_path)
+    # Command details with output (per-part extraction)
+    # Fall back to legacy single-file path when raw_io_paths not populated
+    if session.raw_io_paths:
+        part_outputs = extract_command_outputs_multipart(session.raw_io_paths)
+    else:
+        legacy_path = session.session_dir / "logs" / RAW_IO_LOG_NAME
+        part_outputs = {1: extract_command_outputs(legacy_path)}
+    # Build per-part index counters to map global command list to per-part output index
+    part_indices: dict[int, int] = {p: 0 for p in (session.parts or [1])}
 
     lines.append("## Command Details")
-    for i, cmd in enumerate(session.commands):
+    for cmd in session.commands:
         rel = _relative(start_dt, cmd.timestamp_start)
         tag = tag_command(cmd.command) or "—"
-        lines.append(f"### [{cmd.seq}] `{cmd.command}`")
+        part_label = f" [Part {cmd.part}]" if multipart else ""
+        lines.append(f"### [{cmd.seq}]{part_label} `{cmd.command}`")
         lines.append(
             f"**Time:** {rel} | **Exit:** {cmd.exit_code} "
             f"| **Tag:** {tag} | **Dir:** {cmd.working_directory or '—'}"
         )
-        cmd_output = outputs[i] if i < len(outputs) else ""
+        idx = part_indices.get(cmd.part, 0)
+        part_out_list = part_outputs.get(cmd.part, [])
+        cmd_output = part_out_list[idx] if idx < len(part_out_list) else ""
+        part_indices[cmd.part] = idx + 1
         if cmd_output:
             lines.append("```")
             lines.append(cmd_output)

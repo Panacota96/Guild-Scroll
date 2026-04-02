@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.0] — 2026-04-01
+
+### Added
+
+- **Multi-session parts** — `gscroll start <name> --join` attaches a second terminal as a numbered part under `sessions/<name>/parts/N/`; `gscroll join` merges all parts into a unified timestamped timeline in `logs/session.jsonl`.
+- **Bash hook support** — `hooks.py` now generates bash-compatible hooks (`PROMPT_COMMAND` + `trap DEBUG`); `detect_shell()` picks zsh or bash from `$SHELL`; session recording works in both shells.
+- **CTF platform detection** — `platform_detect.py` inspects the `tun0` VPN interface IP and maps it to `htb` or `thm`; stored in `SessionMeta.platform`.
+- **Auto-screenshot infrastructure** — `screenshot.py` provides flag/root-shell pattern detection (`detect_flag`, `detect_root_shell`, `should_screenshot`) and best-effort capture (`capture_screenshot`) via scrot/import/gnome-screenshot.
+- **Obsidian vault export** — `gscroll export --format obsidian` generates a vault folder with YAML frontmatter, `[[wikilinks]]`, `#phase` tags, and per-note files.
+- **Session sharing** — `gscroll share` archives a session as `.tar.gz`; `gscroll import` restores it (with path-traversal protection and collision handling).
+- **`gscroll join` command** — merges multi-terminal session parts into a unified `session.jsonl`.
+- **`ScreenshotEvent`** dataclass in `log_schema.py`.
+- **`part` field** on `CommandEvent`, `AssetEvent`, `NoteEvent` (default 1, fully backwards-compatible).
+- **`parts_count`** and **`platform`** fields on `SessionMeta` (defaulted, backwards-compatible).
+- **Multi-part awareness** in all consumers: markdown/HTML exporters show `Part` column; TUI sidebar shows parts count and `Part` column in command table; cast exporter accepts `--part N`; search filter accepts `--part`; analysis sorts by timestamp across parts.
+- 99 new tests — total 286 passing.
+
+### Changed
+
+- `session_loader.LoadedSession` gains `parts`, `raw_io_paths`, `timing_paths`, `screenshots` fields.
+- `analysis.compute_phase_timeline` now sorts commands by timestamp before grouping (correct for multi-part sessions).
+- `exporters/cast.py:export_cast` accepts `part` parameter.
+- `cli.py` export command accepts `--part` and `obsidian` format; start command accepts `--join`.
+
+---
+
 ## [0.3.2] — 2026-04-01
 
 ### Added
