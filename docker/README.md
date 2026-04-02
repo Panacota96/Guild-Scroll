@@ -34,15 +34,15 @@ docker run guild-scroll:latest gscroll list
 
 ### `Dockerfile.kali`
 
-**Purpose**: Builds the Debian-based container for Guild Scroll CLI and zsh recording hooks.
+**Purpose**: Builds the Debian-based container for Guild Scroll CLI and zsh recording hooks. This is a convenience image for CLI workflows, not the official Kali base-image variant.
 
 **Key Features**:
 - Based on `debian:bookworm-slim`
 - Installs zsh as default shell
-- Pre-installs common pentesting tools (curl, wget, git, tmux, vim, nano)
+- Pre-installs common CLI/pentesting utilities (curl, wget, git, tmux, vim, nano)
 - Additional tools can be added per use case
-- Includes Guild Scroll for containerized CLI workflows
-- See `Dockerfile.kali.official` for the official Kali-based variant
+- Includes Guild Scroll for containerized CLI workflows on a Debian base
+- Use `Dockerfile.kali.official` if you specifically want the official Kali-based variant and its upstream tooling/auth expectations
 
 **Build Command**:
 ```bash
