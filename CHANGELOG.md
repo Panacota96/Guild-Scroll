@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.1] — 2026-04-02
+
+### Fixed
+
+- **ScreenshotEvent multipart serialization** — `ScreenshotEvent` now includes a backwards-compatible `part` field, and multipart session loading preserves the originating part for screenshot records from older logs.
+
+---
+
 ## [0.4.0] — 2026-04-01
 
 ### Added
