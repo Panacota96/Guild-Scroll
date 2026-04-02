@@ -1,0 +1,6 @@
+{
+  "lifecycleEvent": "PreToolUse",
+  "toolMatcher": "Bash",
+  "command": "bash -lc 'python3 -c \"print(\\\"compare synced versions before git commit\\\")\"'",
+  "description": "Run this before a git commit to block the commit when version strings are out of sync across src/guild_scroll/__init__.py, pyproject.toml, the README.md version badge, and tests/test_cli.py."
+}
