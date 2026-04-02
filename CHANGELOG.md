@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.7.0] — 2026-04-02
+
+### Added
+
+- **Web session cards with metadata display** — `gscroll serve` index page (`GET /`) now renders rich session cards showing session name, formatted start time, hostname, and command count; quick-action links per card: **Open Session**, **Download HTML**, **Download Markdown** (`web/app.py`).
+- **Newest-first session ordering on homepage** — sessions on `GET /` are always sorted by `start_time` descending at render time via `_session_sort_key`; the `list_sessions()` API contract is unchanged.
+- **Tolerant metadata normalization** — missing or non-numeric `command_count` (e.g. `"n/a"`) safely defaults to `0`; missing `hostname` and `start_time` fall back to display strings `"Unknown host"` and `"Unknown time"`.
+- **Correct URL encoding for session paths** — session name path segments in all card href attributes are encoded with `quote(name, safe="")` so reserved characters including `/` and `<` are percent-encoded.
+- **5 new web tests** — sort order, invalid command count handling, HTML escaping, and URL encoding assertions in `tests/test_web.py`.
+
+---
+
 ## [0.6.0] — 2026-04-02
 
 ### Added
