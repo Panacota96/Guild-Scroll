@@ -154,3 +154,11 @@ class TestExportMarkdown:
 
         assert "### Rabbit Holes and Dead Ends" in content
         assert "sqlmap -u http://target/login.php --batch" in content
+
+    def test_operator_is_included_when_present(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.operator = "david"
+        out = tmp_path / "report.md"
+        export_markdown(session, out)
+        content = out.read_text()
+        assert "**Operator:** david" in content

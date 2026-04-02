@@ -132,6 +132,7 @@ _HTML_TEMPLATE = Template("""\
 <h1>Session: $session_name</h1>
 <p class="meta">
   <strong>Host:</strong> $hostname &nbsp;|&nbsp;
+    $operator_html
   <strong>Date:</strong> $start_time &nbsp;|&nbsp;
   <strong>Duration:</strong> $duration &nbsp;|&nbsp;
   <strong>Commands:</strong> $cmd_count
@@ -492,6 +493,11 @@ def export_html(session: LoadedSession, output: Path, writeup: bool = False) -> 
         session_name=html.escape(meta.session_name),
         css=_CSS,
         hostname=html.escape(meta.hostname),
+        operator_html=(
+            f"<strong>Operator:</strong> {html.escape(meta.operator)} &nbsp;|&nbsp;"
+            if getattr(meta, "operator", None)
+            else ""
+        ),
         start_time=html.escape(meta.start_time),
         duration=html.escape(duration),
         cmd_count=len(session.commands),

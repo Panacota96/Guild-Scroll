@@ -33,12 +33,21 @@ def _build_default_markdown(session: LoadedSession, start_dt: datetime, duration
     meta = session.meta
     lines: list[str] = []
     lines.append(f"# Session: {meta.session_name}")
-    lines.append(
-        f"**Host:** {meta.hostname} | "
-        f"**Date:** {meta.start_time} | "
-        f"**Duration:** {duration} | "
-        f"**Commands:** {len(session.commands)}"
-    )
+    if getattr(meta, "operator", None):
+        lines.append(
+            f"**Host:** {meta.hostname} | "
+            f"**Operator:** {meta.operator} | "
+            f"**Date:** {meta.start_time} | "
+            f"**Duration:** {duration} | "
+            f"**Commands:** {len(session.commands)}"
+        )
+    else:
+        lines.append(
+            f"**Host:** {meta.hostname} | "
+            f"**Date:** {meta.start_time} | "
+            f"**Duration:** {duration} | "
+            f"**Commands:** {len(session.commands)}"
+        )
     lines.append("")
 
     multipart = len(session.parts) > 1
@@ -127,7 +136,10 @@ def _build_writeup_markdown(session: LoadedSession, start_dt: datetime, duration
     lines.append("This document contains sensitive security assessment data and is intended only for authorized stakeholders.")
     lines.append("")
     lines.append("## Engagement Contacts")
-    lines.append("- Candidate Name: TODO")
+    if getattr(meta, "operator", None):
+        lines.append(f"- Candidate Name: {meta.operator}")
+    else:
+        lines.append("- Candidate Name: TODO")
     lines.append("- Candidate Email: TODO")
     lines.append("- Customer Contact: TODO")
     lines.append("")

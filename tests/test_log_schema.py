@@ -28,6 +28,17 @@ class TestSessionMeta:
         m = SessionMeta(session_name="s", session_id="i", start_time="t")
         assert m.hostname  # not empty
 
+    def test_operator_roundtrip(self):
+        m = SessionMeta(
+            session_name="op-box",
+            session_id="abc12345",
+            start_time="2026-03-30T00:00:00Z",
+            hostname="kali",
+            operator="david",
+        )
+        m2 = SessionMeta.from_dict(m.to_dict())
+        assert m2.operator == "david"
+
 
 class TestCommandEvent:
     def test_roundtrip(self):

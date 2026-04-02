@@ -105,3 +105,11 @@ class TestExportObsidian:
         export_obsidian(session, out_dir)
         assert (out_dir / "Notes").is_dir()
         assert (out_dir / "Assets").is_dir()
+
+    def test_includes_operator_in_frontmatter(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.operator = "david"
+        out_dir = tmp_path / "vault"
+        export_obsidian(session, out_dir)
+        content = (out_dir / "Session - htb-test.md").read_text()
+        assert "operator: david" in content
