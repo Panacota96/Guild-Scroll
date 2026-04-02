@@ -13,7 +13,7 @@
 
 Guild Scroll wraps your terminal with `script` and zsh hooks to capture every command, output, and asset into structured JSONL logs — so you can replay, search, export, and report without manual note-taking.
 
-[Installation](#installation) · [Quick Start](#quick-start) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Installation](#installation) · [Quick Start](#quick-start) · [Codebase Guide](#codebase-guide) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 </div>
 
@@ -199,6 +199,55 @@ gscroll update
 
 ---
 
+## Tech Stack
+
+| Area | Implementation |
+|---|---|
+| Language/runtime | Python 3.11+ |
+| CLI | Click |
+| Terminal recording | `script` / `scriptreplay` from util-linux |
+| Shell integration | zsh `preexec` / `precmd` hooks |
+| Storage format | JSONL event log + raw terminal I/O logs |
+| Export targets | Markdown, HTML, asciicast v2, Obsidian |
+| Optional UI | Textual TUI |
+| Dependency policy | stdlib-first; core runtime only depends on `click` |
+
+---
+
+## Codebase Guide
+
+### Repository Layout
+
+| Path | Purpose |
+|---|---|
+| `src/guild_scroll/` | Main package: CLI, session management, log schema, exporters, validation, replay, sharing, and web/TUI entrypoints |
+| `src/guild_scroll/exporters/` | Format-specific exporters for Markdown, HTML, asciicast, and Obsidian |
+| `src/guild_scroll/tui/` | Optional Textual dashboard components |
+| `src/guild_scroll/web.py` + `src/guild_scroll/web/` | Local preview server and related web helpers |
+| `tests/` | Pytest suite covering CLI flows, schema compatibility, exporters, merge logic, hooks, and validation |
+| `docs/context-engineering/` | Project-specific design notes for tool/agent workflows |
+| `.github/instructions/` | Shared contributor rules for Python, CLI implementation, and release prep |
+| `.github/skills/` | Reusable workflows such as `/issue` and `/release` |
+
+### How the Python Package Is Organized
+
+- `cli.py` is the entrypoint and keeps command imports lazy so optional features do not slow startup or create circular imports.
+- `session.py`, `session_loader.py`, `recorder.py`, and `hooks.py` own the recording lifecycle: start a session, attach shell hooks, and resolve session data later.
+- `log_schema.py` and `log_writer.py` define the JSONL event model used across recording, export, replay, and validation.
+- `asset_detector.py`, `tool_tagger.py`, `analysis.py`, and `search.py` enrich command history with security-specific metadata.
+- `exporters/` turns a loaded session into shareable outputs; `validator.py` and `merge.py` keep session data consistent across repairs and multi-terminal workflows.
+- `sharing.py`, `web.py`, `updater.py`, and `tui/` are feature layers built on top of the same loaded-session primitives.
+
+### Data Model at a Glance
+
+- `session_meta` stores high-level session state such as name, timestamps, hostname, platform, and part count.
+- `command` records the executed command, timing, exit code, working directory, and terminal part number.
+- `asset` captures downloads, extracts, clones, and other artifacts detected from command history.
+- `note` stores manual annotations added during or after a session.
+- `screenshot` is reserved for automation workflows that attach captured images to the session log.
+
+---
+
 ## Session Format
 
 Sessions are stored under `./guild_scroll/sessions/<name>/` (CWD-local, like `.git/`):
@@ -300,6 +349,18 @@ Contributions, bug reports, and feature requests are welcome.
 - No external dependencies beyond `click` in core code
 - Follow the existing dataclass patterns (`to_dict()` / `from_dict()` with `type`-first serialization)
 - Keep CLI lazy imports (all imports inside command function bodies)
+
+**Developer references:**
+- Quick project overview: `CLAUDE.md`
+- Shared repository rules: `.github/copilot-instructions.md`
+- Auto-loaded implementation guidance: `.github/instructions/`
+- Design/context notes: `docs/context-engineering/`
+
+**High-value documentation issues:**
+- Architecture deep-dive for the recording pipeline, JSONL schema, and multi-session merge flow
+- Infrastructure/release guide covering version sync, changelog expectations, and contributor release workflow
+- Exporter extension guide for adding or maintaining output formats
+- Testing guide for fixtures, CLI coverage patterns, and integration-style session tests
 
 **Shared Copilot customizations:**
 - Workspace guidance: `.github/copilot-instructions.md`
