@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guild-scroll-config
+  namespace: guild-scroll
+  labels:
+    app: guild-scroll
+data:
+  # Guild Scroll environment configuration
+  GUILD_SCROLL_DIR: /work/guild_scroll
+  PYTHONUNBUFFERED: "1"
+  
+  # Kali recorder session prefix
+  SESSION_PREFIX: "k8s-kali-recorder"

@@ -1,0 +1,61 @@
+# Debian-based container with pentest tools for Guild Scroll
+# Using debian:bookworm-slim for better accessibility
+# Note: Kali Linux image (kalilinux/kali:rolling) can be used if you have docker auth
+FROM debian:bookworm-slim
+
+LABEL maintainer="Guild Scroll Contributors"
+LABEL description="Guild Scroll: Debian container with pentest tools for secure terminal session recording"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Update and install base + pentest tools
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3-pip \
+    git \
+    curl \
+    wget \
+    zsh \
+    bash \
+    util-linux \
+    vim \
+    nano \
+    tmux \
+    ca-certificates \
+    nmap \
+    dnsutils \
+    net-tools \
+    netcat-openbsd \
+    telnet \
+    traceroute \
+    whois \
+    dig \
+    socat \
+    tcpdump \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Guild Scroll from current codebase (assumes volume mount)
+WORKDIR /app
+COPY . .
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    python3 -m pip install -e .
+
+# Create work directory for session recording
+WORKDIR /work
+RUN mkdir -p /work/guild_scroll/sessions
+
+# Set environment
+ENV PYTHONUNBUFFERED=1 \
+    GUILD_SCROLL_DIR=/work/guild_scroll
+
+# Copy entrypoint script
+COPY docker/entrypoint-kali.sh /usr/local/bin/entrypoint-kali.sh
+RUN chmod +x /usr/local/bin/entrypoint-kali.sh
+
+# Set zsh as default shell
+RUN chsh -s /bin/zsh root
+
+# Default entrypoint: start zsh session
+ENTRYPOINT ["/usr/local/bin/entrypoint-kali.sh"]
+CMD ["/bin/zsh"]

@@ -1,0 +1,45 @@
+# Official Kali Linux recording container with Guild Scroll
+# Note: This requires Docker authentication with Docker Hub
+# To use this: docker build -f docker/Dockerfile.kali.official -t guild-scroll-kali:latest .
+
+FROM kalilinux/kali:rolling
+
+LABEL maintainer="Guild Scroll Contributors"
+LABEL description="Guild Scroll: Official Kali Linux container for secure terminal session recording"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Update and install Kali tools
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    kali-linux-core \
+    python3.11 \
+    python3-pip \
+    git \
+    zsh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Guild Scroll from current codebase (assumes volume mount)
+WORKDIR /app
+COPY . .
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    python3 -m pip install -e .
+
+# Create work directory for session recording
+WORKDIR /work
+RUN mkdir -p /work/guild_scroll/sessions
+
+# Set environment
+ENV PYTHONUNBUFFERED=1 \
+    GUILD_SCROLL_DIR=/work/guild_scroll
+
+# Copy entrypoint script
+COPY docker/entrypoint-kali.sh /usr/local/bin/entrypoint-kali.sh
+RUN chmod +x /usr/local/bin/entrypoint-kali.sh
+
+# Set zsh as default shell
+RUN chsh -s /bin/zsh root
+
+# Default entrypoint: start zsh session
+ENTRYPOINT ["/usr/local/bin/entrypoint-kali.sh"]
+CMD ["/bin/zsh"]

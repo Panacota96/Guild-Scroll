@@ -1,0 +1,61 @@
+# Build stage: compile and prepare application
+FROM python:3.11-slim as builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy source code
+COPY . .
+
+# Create a fresh Python environment and build the package
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install the package and dependencies
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install -e .
+
+# Production stage
+FROM python:3.11-slim
+
+LABEL maintainer="Guild Scroll Contributors"
+LABEL description="Guild Scroll: CTF/pentest session recorder and analyzer"
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    util-linux \
+    zsh \
+    bash \
+    ca-certificates \
+    curl \
+    bc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Set environment variables
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    GUILD_SCROLL_DIR=/work/guild_scroll
+
+# Create work directory and session storage
+WORKDIR /work
+RUN mkdir -p /work/guild_scroll/sessions /work/guild_scroll/exports
+
+# Copy entrypoint script
+COPY docker/entrypoint-app.sh /usr/local/bin/entrypoint-app.sh
+RUN chmod +x /usr/local/bin/entrypoint-app.sh
+
+# Health check for web service
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/api/sessions 2>/dev/null || exit 1
+
+# Default entrypoint
+ENTRYPOINT ["/usr/local/bin/entrypoint-app.sh"]
+CMD ["serve"]
