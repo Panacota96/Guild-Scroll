@@ -2,6 +2,7 @@
 Session lifecycle: start, finalize, list, status.
 """
 import json
+import logging
 import os
 import shutil
 import socket
@@ -22,6 +23,9 @@ from guild_scroll.log_schema import SessionMeta, CommandEvent, AssetEvent
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.recorder import start_recording
 from guild_scroll.utils import iso_timestamp, sanitize_session_name, generate_session_id
+
+
+logger = logging.getLogger(__name__)
 
 
 def _session_dir(session_name: str) -> Path:
@@ -173,6 +177,7 @@ def finalize_session(
     writer = JSONLWriter(final_log)
 
     command_count = 0
+    command_working_directories: dict[int, Path] = {}
     for evt in events:
         etype = evt.get("type")
         if etype == "command":
@@ -181,13 +186,23 @@ def finalize_session(
                 evt["part"] = part
                 cmd_event = CommandEvent.from_dict(evt)
                 writer.write(cmd_event.to_dict())
+                command_working_directories[cmd_event.seq] = Path(cmd_event.working_directory)
                 command_count += 1
             except (TypeError, KeyError):
                 pass
         elif etype == "asset_hint":
             original_path = Path(evt.get("original_path", ""))
-            if original_path.exists():
-                dest = _capture_asset_for_event(original_path, assets_dir)
+            working_directory = command_working_directories.get(evt.get("seq", 0))
+            resolved_path = _resolve_asset_path_for_event(original_path, working_directory)
+            if resolved_path is None:
+                logger.warning(
+                    "Rejected asset path %s for session %s",
+                    original_path,
+                    name,
+                )
+                continue
+            if resolved_path.exists():
+                dest = _capture_asset_for_event(resolved_path, assets_dir)
                 if dest:
                     asset_event = AssetEvent(
                         seq=evt.get("seq", 0),
@@ -213,6 +228,13 @@ def finalize_session(
 def _capture_asset_for_event(source: Path, assets_dir: Path) -> Optional[Path]:
     from guild_scroll.asset_detector import capture_asset
     return capture_asset(source, assets_dir, MAX_ASSET_SIZE_BYTES)
+
+
+def _resolve_asset_path_for_event(source: Path, working_directory: Optional[Path]) -> Optional[Path]:
+    if working_directory is None:
+        return None
+    from guild_scroll.asset_detector import resolve_asset_source_path
+    return resolve_asset_source_path(source, working_directory)
 
 
 def _patch_session_meta(log_path: Path, end_time: str, command_count: int) -> None:

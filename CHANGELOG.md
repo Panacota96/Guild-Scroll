@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.1] — 2026-04-02
+
+### Fixed
+
+- **Asset capture path traversal** — `finalize_session()` now validates asset hint paths against the originating command's working directory, rejects `..` traversal or out-of-tree resolved paths with a warning, and skips copying rejected files into `assets/`.
+
+---
+
 ## [0.4.0] — 2026-04-01
 
 ### Added
