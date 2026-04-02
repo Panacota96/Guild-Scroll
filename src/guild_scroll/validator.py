@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from guild_scroll.config import PARTS_DIR_NAME, SESSION_LOG_NAME
@@ -79,7 +80,7 @@ def _collect_log_records(sess_dir: Path, report: ValidationReport) -> tuple[list
         return log_paths, all_records, None
 
     try:
-        parts_count = max(int(meta.get("parts_count", 1) or 1), 1)
+        parts_count = max(int(meta.get("parts_count") or 1), 1)
     except (TypeError, ValueError):
         report.errors.append("session_meta.parts_count must be an integer")
         parts_count = 1
@@ -189,17 +190,43 @@ def validate_session(sess_dir: Path) -> ValidationReport:
     return report
 
 
+def _parse_timestamp(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _latest_event_timestamp(records: list[dict], meta: dict) -> str:
-    timestamps: list[str] = [meta.get("start_time", "")]
+    candidates: list[tuple[datetime, str]] = []
+
+    start_time = meta.get("start_time", "")
+    parsed_start = _parse_timestamp(start_time)
+    if parsed_start is not None:
+        candidates.append((parsed_start, start_time))
+
     for record in records:
         record_type = record.get("type")
         if record_type == "command":
-            timestamps.extend(
-                [record.get("timestamp_end", ""), record.get("timestamp_start", "")]
-            )
+            timestamps = [record.get("timestamp_end", ""), record.get("timestamp_start", "")]
         elif record_type in {"asset", "note", "screenshot"}:
-            timestamps.append(record.get("timestamp", ""))
-    return max((timestamp for timestamp in timestamps if timestamp), default=meta.get("start_time", ""))
+            timestamps = [record.get("timestamp", "")]
+        else:
+            timestamps = []
+
+        for timestamp in timestamps:
+            parsed = _parse_timestamp(timestamp)
+            if parsed is not None:
+                candidates.append((parsed, timestamp))
+
+    if not candidates:
+        return start_time
+    return max(candidates, key=lambda item: item[0])[1]
 
 
 def repair_session(sess_dir: Path) -> ValidationReport:
