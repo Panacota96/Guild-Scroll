@@ -272,7 +272,7 @@ def _render_index_page(sessions: list[dict]) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guild Scroll Sessions</title>
+<title>Guild Scroll Session Codex</title>
 <style>
 :root {
   --bg-void: #060b14;
