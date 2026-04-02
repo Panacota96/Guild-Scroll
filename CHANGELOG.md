@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.1] — 2026-04-02
+
+### Fixed
+
+- **Concurrent session finalization** — `JSONLWriter` now uses a file-level lock while used as a context manager, and `finalize_session()` keeps append + session metadata updates inside the same critical section so concurrent writers cannot corrupt `session.jsonl`.
+
+---
+
 ## [0.4.0] — 2026-04-01
 
 ### Added

@@ -78,9 +78,8 @@ def start_session(raw_name: str, join: bool = False) -> None:
         platform=platform,
     )
     final_log = logs_dir / SESSION_LOG_NAME
-    writer = JSONLWriter(final_log)
-    writer.write(meta.to_dict())
-    writer.close()
+    with JSONLWriter(final_log) as writer:
+        writer.write(meta.to_dict())
 
     try:
         start_recording(raw_io_path, timing_path, hook_dir, hook_events_path, session_name=name, shell=shell)
@@ -118,9 +117,8 @@ def _start_part(session_name: str, sess_dir: Path) -> None:
         hostname=socket.gethostname(),
     )
     part_log = part_logs_dir / SESSION_LOG_NAME
-    writer = JSONLWriter(part_log)
-    writer.write(part_meta.to_dict())
-    writer.close()
+    with JSONLWriter(part_log) as writer:
+        writer.write(part_meta.to_dict())
 
     env_part = str(next_part)
     try:
@@ -169,39 +167,35 @@ def finalize_session(
             except json.JSONDecodeError:
                 continue
 
-    # Re-open final log in append mode
-    writer = JSONLWriter(final_log)
-
     command_count = 0
-    for evt in events:
-        etype = evt.get("type")
-        if etype == "command":
-            try:
-                # Inject part number
-                evt["part"] = part
-                cmd_event = CommandEvent.from_dict(evt)
-                writer.write(cmd_event.to_dict())
-                command_count += 1
-            except (TypeError, KeyError):
-                pass
-        elif etype == "asset_hint":
-            original_path = Path(evt.get("original_path", ""))
-            if original_path.exists():
-                dest = _capture_asset_for_event(original_path, assets_dir)
-                if dest:
-                    asset_event = AssetEvent(
-                        seq=evt.get("seq", 0),
-                        trigger_command=evt.get("trigger_command", ""),
-                        asset_type="download",
-                        captured_path=str(dest.relative_to(assets_dir.parent)),
-                        original_path=str(original_path),
-                        timestamp=evt.get("timestamp", iso_timestamp()),
-                        part=part,
-                    )
-                    writer.write(asset_event.to_dict())
+    with JSONLWriter(final_log) as writer:
+        for evt in events:
+            etype = evt.get("type")
+            if etype == "command":
+                try:
+                    evt["part"] = part
+                    cmd_event = CommandEvent.from_dict(evt)
+                    writer.write(cmd_event.to_dict())
+                    command_count += 1
+                except (TypeError, KeyError):
+                    pass
+            elif etype == "asset_hint":
+                original_path = Path(evt.get("original_path", ""))
+                if original_path.exists():
+                    dest = _capture_asset_for_event(original_path, assets_dir)
+                    if dest:
+                        asset_event = AssetEvent(
+                            seq=evt.get("seq", 0),
+                            trigger_command=evt.get("trigger_command", ""),
+                            asset_type="download",
+                            captured_path=str(dest.relative_to(assets_dir.parent)),
+                            original_path=str(original_path),
+                            timestamp=evt.get("timestamp", iso_timestamp()),
+                            part=part,
+                        )
+                        writer.write(asset_event.to_dict())
 
-    writer.close()
-    _patch_session_meta(final_log, iso_timestamp(), command_count)
+        _patch_session_meta(final_log, iso_timestamp(), command_count)
 
     # Clean up intermediate hook events
     try:
