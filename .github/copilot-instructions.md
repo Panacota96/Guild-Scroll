@@ -11,3 +11,4 @@ Contributor expectations:
 - Follow TDD: update tests with behavior changes.
 - Keep release work aligned with the 4-file version sync requirement.
 - Use `/issue` for structured issue drafts and `/release` for the release checklist.
+- Use `/doc-sync` after adding or modifying any code, command, config, or infra — every change must be documented and cross-linked to `README.md` and `docs/`.

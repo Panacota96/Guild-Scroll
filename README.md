@@ -13,7 +13,7 @@
 
 Guild Scroll wraps your terminal with `script` and zsh hooks to capture every command, output, and asset into structured JSONL logs — so you can replay, search, export, and report without manual note-taking.
 
-[Installation](#installation) · [Quick Start](#quick-start) · [Codebase Guide](#codebase-guide) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Installation](#installation) · [Quick Start](#quick-start) · [Deployment Modes](docs/docker/deployment-modes.md) · [Codebase Guide](#codebase-guide) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 </div>
 
@@ -123,19 +123,33 @@ graph LR
 
 ## Installation
 
-### Recommended: pipx
+Guild Scroll runs in three ways — pick the one that matches your setup:
+
+| Mode | Best for | Requires |
+|---|---|---|
+| **[Option A: Local install](#option-a-local-install)** | Your own Linux/macOS machine | Python 3.11+, `script` (util-linux), zsh/bash |
+| **[Option B: Existing container](#option-b-existing-container-exegol--kali--custom)** | Already inside Exegol, Kali, or another pentest image | Nothing extra — install Guild Scroll inside the container you already have |
+| **[Option C: Managed Docker / Kubernetes](#option-c-managed-docker--kubernetes)** | Fresh isolated environment, team lab, or CI | Docker 20.10+ or a Kubernetes cluster |
+
+> **Already inside Exegol?** Skip to [Option B](#option-b-existing-container-exegol--kali--custom) — no new container needed.
+
+---
+
+### Option A: Local Install
+
+#### Recommended: pipx
 
 ```bash
 pipx install git+https://github.com/Panacota96/Guild-Scroll.git
 ```
 
-### With TUI support
+#### With TUI support
 
 ```bash
 pipx install "git+https://github.com/Panacota96/Guild-Scroll.git[tui]"
 ```
 
-### From source (virtual environment)
+#### From source (virtual environment)
 
 ```bash
 git clone https://github.com/Panacota96/Guild-Scroll.git
@@ -145,7 +159,84 @@ source .venv/bin/activate
 pip install -e '.[tui]'
 ```
 
-> **Note for Kali/managed Python environments:** use `pipx` or a venv — avoid `pip install --break-system-packages`.
+**System prerequisites** (usually pre-installed on Kali/Ubuntu):
+```bash
+# Debian / Kali
+sudo apt install util-linux zsh
+
+# Arch
+sudo pacman -S util-linux zsh
+```
+
+> **Note for managed Python environments (Kali, Parrot):** use `pipx` or a venv — avoid `pip install --break-system-packages`.
+
+See [docs/docker/deployment-modes.md](docs/docker/deployment-modes.md) for full platform support matrix.
+
+---
+
+### Option B: Existing Container (Exegol / Kali / custom)
+
+If you are already working inside a container that has Python 3.11+, `script`, and zsh/bash — **you do not need to spin up a new container**. Just install Guild Scroll directly inside the running environment:
+
+```bash
+# 1. Verify prerequisites (usually already present in Exegol/Kali)
+python3 --version          # must be ≥ 3.11
+script --version           # from util-linux ≥ 2.35
+which zsh || which bash
+
+# 2. Install Guild Scroll
+pipx install git+https://github.com/Panacota96/Guild-Scroll.git
+
+# 3. Point sessions at a bind-mounted volume so data survives container restarts
+export GUILD_SCROLL_DIR=/recordings   # or any volume-mounted path
+
+# 4. Start recording
+gscroll start htb-machine
+```
+
+**Persist sessions across container restarts** by mounting a host path:
+```bash
+# When starting Exegol (example — adapt to your launcher)
+exegol start htb --volume /host/pentest-sessions:/recordings
+
+# Then inside the container
+export GUILD_SCROLL_DIR=/recordings
+gscroll start htb-machine
+```
+
+See the full [Existing Container Guide](docs/docker/existing-container.md) for Exegol-specific steps, troubleshooting, and hook compatibility notes.
+
+---
+
+### Option C: Managed Docker / Kubernetes
+
+Spin up a clean, fully-isolated environment with Guild Scroll pre-configured — no host dependencies required. This starts two containers: a **recording shell** (Debian + pentest tools) and a **Guild Scroll app** (web UI + CLI):
+
+```bash
+# Clone and start
+git clone https://github.com/Panacota96/Guild-Scroll.git
+cd Guild-Scroll
+docker-compose up -d
+
+# Access web UI
+open http://localhost:8080               # or curl http://localhost:8080/api/sessions
+
+# Access recording shell
+docker-compose exec kali-recorder zsh
+
+# Work normally — all commands auto-recorded
+nmap -sV target.com
+exit
+```
+
+For Kubernetes deployments:
+```bash
+kubectl apply -k k8s/
+kubectl port-forward -n guild-scroll svc/guild-scroll-app 8080:8080
+kubectl exec -it -n guild-scroll kali-recorder-0 -- zsh
+```
+
+See [DOCKER.md](DOCKER.md) for full Docker + Kubernetes guide, including troubleshooting, custom tools, and volume configuration.
 
 ---
 
@@ -355,6 +446,7 @@ Contributions, bug reports, and feature requests are welcome.
 - Shared repository rules: `.github/copilot-instructions.md`
 - Auto-loaded implementation guidance: `.github/instructions/`
 - Design/context notes: `docs/context-engineering/`
+- Deployment mode docs: `docs/docker/` and `DOCKER.md`
 
 **High-value documentation issues:**
 - Architecture deep-dive for the recording pipeline, JSONL schema, and multi-session merge flow
@@ -366,7 +458,7 @@ Contributions, bug reports, and feature requests are welcome.
 - Workspace guidance: `.github/copilot-instructions.md`
 - Auto-loaded instructions: `.github/instructions/`
 - Shared agents: `.github/agents/tdd-enforcer.agent.md`, `.github/agents/release-manager.agent.md`, `.github/agents/docs-maintainer.agent.md`
-- Shared skills: `.github/skills/issue-from-template/SKILL.md` (`/issue`) and `.github/skills/release-cycle/SKILL.md` (`/release`)
+- Shared skills: `.github/skills/issue-from-template/SKILL.md` (`/issue`), `.github/skills/release-cycle/SKILL.md` (`/release`), and `.github/skills/doc-sync/SKILL.md` (`/doc-sync`)
 - Version-check hook: `.github/hooks/version-check.json` documents the pre-commit version sync check
 
 Found a bug or have an idea? [Open an issue](https://github.com/Panacota96/Guild-Scroll/issues).
