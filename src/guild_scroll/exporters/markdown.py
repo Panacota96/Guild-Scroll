@@ -84,15 +84,24 @@ def export_markdown(session: LoadedSession, output: Path) -> None:
             )
     lines.append("")
 
-    # Command details with output (per-part extraction)
-    # Fall back to legacy single-file path when raw_io_paths not populated
-    if session.raw_io_paths:
+    if session.command_outputs:
+        output_map = dict(session.command_outputs)
+    elif session.raw_io_paths:
         part_outputs = extract_command_outputs_multipart(session.raw_io_paths)
+        output_map = {}
+        part_indices: dict[int, int] = {p: 0 for p in (session.parts or [1])}
+        for cmd in session.commands:
+            idx = part_indices.get(cmd.part, 0)
+            outputs = part_outputs.get(cmd.part, [])
+            output_map[(cmd.part, cmd.seq)] = outputs[idx] if idx < len(outputs) else ""
+            part_indices[cmd.part] = idx + 1
     else:
         legacy_path = session.session_dir / "logs" / RAW_IO_LOG_NAME
-        part_outputs = {1: extract_command_outputs(legacy_path)}
-    # Build per-part index counters to map global command list to per-part output index
-    part_indices: dict[int, int] = {p: 0 for p in (session.parts or [1])}
+        outputs = extract_command_outputs(legacy_path)
+        output_map = {
+            (cmd.part, cmd.seq): outputs[index] if index < len(outputs) else ""
+            for index, cmd in enumerate(session.commands)
+        }
 
     lines.append("## Command Details")
     for cmd in session.commands:
@@ -104,10 +113,7 @@ def export_markdown(session: LoadedSession, output: Path) -> None:
             f"**Time:** {rel} | **Exit:** {cmd.exit_code} "
             f"| **Tag:** {tag} | **Dir:** {cmd.working_directory or '—'}"
         )
-        idx = part_indices.get(cmd.part, 0)
-        part_out_list = part_outputs.get(cmd.part, [])
-        cmd_output = part_out_list[idx] if idx < len(part_out_list) else ""
-        part_indices[cmd.part] = idx + 1
+        cmd_output = output_map.get((cmd.part, cmd.seq), "")
         if cmd_output:
             lines.append("```")
             lines.append(cmd_output)

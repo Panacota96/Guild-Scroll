@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.4.0-green)
+![Version](https://img.shields.io/badge/version-0.5.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -41,7 +41,7 @@ gscroll export --format md   # structured report, ready to share
 | **Tool tagging** | 40+ security tools auto-classified as `recon` / `exploit` / `post-exploit` |
 | **MITRE ATT&CK** | Each tool mapped to a MITRE technique ID |
 | **Annotations** | Timestamped notes and tags, mid-session or post-session |
-| **Export** | Markdown report, self-contained HTML, asciicast v2 (`.cast`) |
+| **Export** | Markdown report, self-contained HTML, live web previews/downloads, asciicast v2 (`.cast`) |
 | **Search** | `gscroll search --tool nmap --phase recon --exit-code 0` |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |

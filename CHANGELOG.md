@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.5.0] — 2026-04-02
+
+### Added
+
+- **`gscroll serve`** — launches a localhost-only web report server with session pages, full Markdown/HTML report rendering, and downloadable exports.
+- **Web report downloads** — `GET /api/session/<name>/download?format=md|html` returns attachment responses with the correct filename and MIME type.
+- **HTML preview iframe** — session pages now render the full HTML export inline via a sandboxed iframe, with Markdown previews shown as raw text in a `<pre>`.
+
+### Changed
+
+- **Report API** — `POST /api/session/<name>/report` now returns the full Markdown or HTML document instead of a preview snippet.
+- **Filtered report exports** — web previews/downloads reuse the existing exporters while preserving command filter parameters (`tool`, `phase`, `exit_code`, `cwd`, `part`).
+
+---
+
 ## [0.4.0] — 2026-04-01
 
 ### Added

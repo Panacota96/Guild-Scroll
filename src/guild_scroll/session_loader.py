@@ -25,6 +25,7 @@ class LoadedSession:
     raw_io_paths: dict[int, Path] = field(default_factory=dict)
     timing_paths: dict[int, Path] = field(default_factory=dict)
     screenshots: list[ScreenshotEvent] = field(default_factory=list)
+    command_outputs: dict[tuple[int, int], str] = field(default_factory=dict)
 
 
 def resolve_session(name_or_current: Optional[str]) -> Path:

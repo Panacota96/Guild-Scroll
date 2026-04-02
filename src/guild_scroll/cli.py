@@ -1,6 +1,6 @@
 """
 Click CLI: gscroll start | list | status | note | export | replay | search | tui | update
-           join | share | import
+           join | share | import | serve
 """
 import sys
 import click
@@ -394,6 +394,29 @@ def tui(session_name):
 
     app = GuildScrollApp(sess_dir.name)
     app.run()
+
+
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll serve\n"
+        "  gscroll serve --port 1551\n"
+        "\n"
+        "Serves the report UI on localhost only."
+    )
+)
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind.")
+@click.option("--port", default=1551, show_default=True, type=int, help="Port to bind.")
+def serve(host, port):
+    """Launch the local web report server."""
+    from guild_scroll.web.app import run_server
+
+    try:
+        run_server(host=host, port=port)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
 
 
 @cli.command(

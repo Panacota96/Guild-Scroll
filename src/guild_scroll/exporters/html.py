@@ -9,7 +9,7 @@ from pathlib import Path
 from string import Template
 
 from guild_scroll.config import RAW_IO_LOG_NAME
-from guild_scroll.exporters.output_extractor import extract_command_outputs
+from guild_scroll.exporters.output_extractor import extract_command_outputs, extract_command_outputs_multipart
 from guild_scroll.session_loader import LoadedSession
 from guild_scroll.tool_tagger import tag_command
 
@@ -145,15 +145,31 @@ def export_html(session: LoadedSession, output: Path) -> None:
         )
     notes_html = "\n".join(note_parts) if note_parts else "<p><em>No notes.</em></p>"
 
-    # Command details with output
-    raw_io_path = session.session_dir / "logs" / RAW_IO_LOG_NAME
-    outputs = extract_command_outputs(raw_io_path)
+    if session.command_outputs:
+        output_map = dict(session.command_outputs)
+    elif session.raw_io_paths:
+        part_outputs = extract_command_outputs_multipart(session.raw_io_paths)
+        output_map = {}
+        part_indices: dict[int, int] = {p: 0 for p in (session.parts or [1])}
+        for cmd in session.commands:
+            idx = part_indices.get(cmd.part, 0)
+            outputs = part_outputs.get(cmd.part, [])
+            output_map[(cmd.part, cmd.seq)] = outputs[idx] if idx < len(outputs) else ""
+            part_indices[cmd.part] = idx + 1
+    else:
+        raw_io_path = session.session_dir / "logs" / RAW_IO_LOG_NAME
+        outputs = extract_command_outputs(raw_io_path)
+        output_map = {
+            (cmd.part, cmd.seq): outputs[index] if index < len(outputs) else ""
+            for index, cmd in enumerate(session.commands)
+        }
+
     detail_parts: list[str] = []
-    for i, cmd in enumerate(session.commands):
+    for cmd in session.commands:
         rel = _relative(start_dt, cmd.timestamp_start)
         tag = tag_command(cmd.command)
         badge = _tag_badge(tag)
-        cmd_output = outputs[i] if i < len(outputs) else ""
+        cmd_output = output_map.get((cmd.part, cmd.seq), "")
         output_block = (
             f'<pre class="cmd-output">{html.escape(cmd_output)}</pre>'
             if cmd_output else
