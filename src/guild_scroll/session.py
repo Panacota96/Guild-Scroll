@@ -34,6 +34,15 @@ def _session_dir(session_name: str) -> Path:
     return get_sessions_dir() / session_name
 
 
+def _detect_operator() -> Optional[str]:
+    """Return current operator identity from environment, if available."""
+    for key in ("USER", "LOGNAME", "USERNAME"):
+        value = os.environ.get(key)
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
 def start_session(raw_name: str, join: bool = False) -> None:
     """
     Create the session directory tree, inject hooks, launch script, finalize.
@@ -82,6 +91,7 @@ def start_session(raw_name: str, join: bool = False) -> None:
         start_time=iso_timestamp(),
         hostname=socket.gethostname(),
         platform=platform,
+        operator=_detect_operator(),
     )
     final_log = logs_dir / SESSION_LOG_NAME
     with JSONLWriter(final_log) as writer:
@@ -121,6 +131,7 @@ def _start_part(session_name: str, sess_dir: Path) -> None:
         session_id=generate_session_id(),
         start_time=iso_timestamp(),
         hostname=socket.gethostname(),
+        operator=_detect_operator(),
     )
     part_log = part_logs_dir / SESSION_LOG_NAME
     with JSONLWriter(part_log) as writer:

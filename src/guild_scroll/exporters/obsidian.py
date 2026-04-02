@@ -80,6 +80,8 @@ def export_obsidian(session: LoadedSession, output_dir: Path) -> None:
         lines.append(f"  - {tag}")
     lines.append(f"created: {meta.start_time}")
     lines.append(f"hostname: {meta.hostname}")
+    if getattr(meta, "operator", None):
+        lines.append(f"operator: {meta.operator}")
     lines.append(f"commands: {len(session.commands)}")
     if getattr(meta, "platform", None):
         lines.append(f"platform: {meta.platform}")

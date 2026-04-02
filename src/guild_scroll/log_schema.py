@@ -20,6 +20,7 @@ class SessionMeta:
     command_count: int = 0
     parts_count: int = 1
     platform: Optional[str] = None  # "htb" | "thm" | None
+    operator: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

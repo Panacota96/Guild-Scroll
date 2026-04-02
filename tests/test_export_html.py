@@ -68,3 +68,12 @@ class TestExportHtml:
         assert out.exists()
         content = out.read_text()
         assert "<!DOCTYPE html>" in content
+
+    def test_includes_operator_when_present(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.operator = "david"
+        out = tmp_path / "report.html"
+        export_html(session, out)
+        content = out.read_text()
+        assert "Operator:" in content
+        assert "david" in content

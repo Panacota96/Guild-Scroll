@@ -14,6 +14,7 @@ from guild_scroll.session import (
     list_sessions,
     _read_session_meta,
     _patch_session_meta,
+    _detect_operator,
 )
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.log_schema import SessionMeta
@@ -159,3 +160,23 @@ class TestPatchSessionMeta:
         m = next(r for r in records if r["type"] == "session_meta")
         assert m["end_time"] == "2026-03-30T12:00:00Z"
         assert m["command_count"] == 5
+
+
+class TestDetectOperator:
+    def test_prefers_user(self, monkeypatch):
+        monkeypatch.setenv("USER", "alice")
+        monkeypatch.setenv("LOGNAME", "bob")
+        monkeypatch.setenv("USERNAME", "charlie")
+        assert _detect_operator() == "alice"
+
+    def test_falls_back_to_logname_then_username(self, monkeypatch):
+        monkeypatch.delenv("USER", raising=False)
+        monkeypatch.setenv("LOGNAME", "bob")
+        monkeypatch.setenv("USERNAME", "charlie")
+        assert _detect_operator() == "bob"
+
+    def test_returns_none_when_missing(self, monkeypatch):
+        monkeypatch.delenv("USER", raising=False)
+        monkeypatch.delenv("LOGNAME", raising=False)
+        monkeypatch.delenv("USERNAME", raising=False)
+        assert _detect_operator() is None
