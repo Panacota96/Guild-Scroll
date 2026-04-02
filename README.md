@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.4.1-green)
+![Version](https://img.shields.io/badge/version-0.5.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -42,7 +42,7 @@ gscroll export --format md   # structured report, ready to share
 | **MITRE ATT&CK** | Each tool mapped to a MITRE technique ID |
 | **Annotations** | Timestamped notes and tags, mid-session or post-session |
 | **Export** | Markdown report, self-contained HTML, live web previews/downloads, asciicast v2 (`.cast`) |
-| **Search** | `gscroll search --tool nmap --phase recon --exit-code 0` |
+| **Search** | `gscroll search --tool nmap --phase recon --exit-code 0 --output-contains 'open'` |
 | **Validation** | `gscroll validate [SESSION] --repair` checks JSONL/assets/parts and patches repairable metadata |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
@@ -161,6 +161,8 @@ gscroll note "found open port 80 — Apache 2.4" --tag recon
 # Search commands
 gscroll search --phase recon
 gscroll search --tool nmap --exit-code 0
+gscroll search --output-contains "80/tcp open"
+gscroll search --tool nmap --output-contains "open"
 
 # Validate integrity and repair session metadata
 gscroll validate htb-machine --repair
@@ -298,7 +300,7 @@ Override the base path with `GUILD_SCROLL_DIR`.
 - [x] Attack phase timeline (recon → exploit → post-exploit)
 - [x] MITRE ATT&CK mapping
 - [x] `gscroll tui` — Textual TUI dashboard
-- [x] `gscroll search` — filter by tool, phase, exit code, cwd
+- [x] `gscroll search` — filter by tool, phase, exit code, cwd, output-contains
 - [x] `[REC]` colored prompt indicator
 - [x] Auto-detect active session
 

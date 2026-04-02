@@ -84,3 +84,70 @@ def test_no_matches_returns_empty():
     session = _make_session(cmds)
     results = search_commands(session, SearchFilter(tool="sqlmap"))
     assert results == []
+
+
+# --- output_contains filter ---
+
+def _make_session_with_outputs(commands, outputs):
+    """Build a LoadedSession with pre-populated command_outputs."""
+    meta = SessionMeta(
+        session_name="test",
+        session_id=generate_session_id(),
+        start_time=iso_timestamp(),
+    )
+    # command_outputs keys are (part, seq)
+    command_outputs = {(cmd.part, cmd.seq): out for cmd, out in zip(commands, outputs)}
+    return LoadedSession(
+        meta=meta,
+        commands=commands,
+        assets=[],
+        notes=[],
+        session_dir=Path("/tmp"),
+        command_outputs=command_outputs,
+    )
+
+
+def test_filter_by_output_contains_positive():
+    cmds = [_make_cmd(1, "nmap -sV 10.0.0.1"), _make_cmd(2, "ls /tmp")]
+    session = _make_session_with_outputs(cmds, ["80/tcp open http", "file.txt"])
+    results = search_commands(session, SearchFilter(output_contains="80/tcp"))
+    assert len(results) == 1
+    assert results[0].seq == 1
+
+
+def test_filter_by_output_contains_negative():
+    cmds = [_make_cmd(1, "nmap -sV 10.0.0.1"), _make_cmd(2, "ls /tmp")]
+    session = _make_session_with_outputs(cmds, ["filtered output", "file.txt"])
+    results = search_commands(session, SearchFilter(output_contains="open port 443"))
+    assert results == []
+
+
+def test_filter_by_output_contains_case_insensitive():
+    cmds = [_make_cmd(1, "nmap -sV 10.0.0.1"), _make_cmd(2, "ls /tmp")]
+    session = _make_session_with_outputs(cmds, ["80/tcp OPEN HTTP", "file.txt"])
+    results = search_commands(session, SearchFilter(output_contains="open http"))
+    assert len(results) == 1
+    assert results[0].seq == 1
+
+
+def test_filter_by_output_contains_combined_with_tool():
+    cmds = [
+        _make_cmd(1, "nmap -sV 10.0.0.1"),
+        _make_cmd(2, "nmap -p 443 10.0.0.1"),
+        _make_cmd(3, "curl http://10.0.0.1"),
+    ]
+    session = _make_session_with_outputs(
+        cmds,
+        ["80/tcp open http", "443/tcp open https", "200 OK"],
+    )
+    results = search_commands(session, SearchFilter(tool="nmap", output_contains="open"))
+    assert len(results) == 2
+    assert {r.seq for r in results} == {1, 2}
+
+
+def test_filter_by_output_contains_no_output_data():
+    """Commands with no recorded output do not match an output_contains filter."""
+    cmds = [_make_cmd(1, "nmap -sV 10.0.0.1")]
+    session = _make_session_with_outputs(cmds, [""])
+    results = search_commands(session, SearchFilter(output_contains="open"))
+    assert results == []
