@@ -20,6 +20,7 @@ from guild_scroll.config import (
     PARTS_DIR_NAME,
 )
 from guild_scroll.hooks import create_hook_dir, detect_shell
+from guild_scroll.integrity import generate_session_key, load_session_key
 from guild_scroll.log_schema import SessionMeta, CommandEvent, AssetEvent
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.recorder import start_recording
@@ -32,6 +33,18 @@ _FINALIZE_LOCKS_GUARD = threading.Lock()
 
 def _session_dir(session_name: str) -> Path:
     return get_sessions_dir() / session_name
+
+
+def _session_root_from_logs_dir(logs_dir: Path, part: int) -> Path:
+    """Return the top-level session directory given a logs directory and part number.
+
+    Part 1 keeps logs at ``{sess_dir}/logs/``.
+    Parts 2+ keep logs at ``{sess_dir}/parts/{N}/logs/``.
+    """
+    if part == 1:
+        return logs_dir.parent
+    # parts/{N}/logs → parent = parts/{N}, parent = parts, parent = sess_dir
+    return logs_dir.parent.parent.parent
 
 
 def _detect_operator() -> Optional[str]:
@@ -94,7 +107,8 @@ def start_session(raw_name: str, join: bool = False) -> None:
         operator=_detect_operator(),
     )
     final_log = logs_dir / SESSION_LOG_NAME
-    with JSONLWriter(final_log) as writer:
+    hmac_key = generate_session_key(sess_dir)
+    with JSONLWriter(final_log, hmac_key=hmac_key) as writer:
         writer.write(meta.to_dict())
 
     try:
@@ -134,7 +148,8 @@ def _start_part(session_name: str, sess_dir: Path) -> None:
         operator=_detect_operator(),
     )
     part_log = part_logs_dir / SESSION_LOG_NAME
-    with JSONLWriter(part_log) as writer:
+    hmac_key = load_session_key(sess_dir)
+    with JSONLWriter(part_log, hmac_key=hmac_key) as writer:
         writer.write(part_meta.to_dict())
 
     env_part = str(next_part)
@@ -186,7 +201,8 @@ def finalize_session(
                     continue
 
         # Re-open final log in append mode
-        writer = JSONLWriter(final_log)
+        _hmac_key = load_session_key(_session_root_from_logs_dir(logs_dir, part))
+        writer = JSONLWriter(final_log, hmac_key=_hmac_key)
 
         for evt in events:
             etype = evt.get("type")

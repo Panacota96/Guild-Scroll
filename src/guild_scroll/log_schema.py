@@ -44,10 +44,14 @@ class CommandEvent:
     working_directory: str
     type: str = field(default="command", init=False)
     part: int = 1  # which terminal part this command came from
+    event_hmac: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        return {"type": d.pop("type"), **d}
+        result = {"type": d.pop("type"), **d}
+        if result.get("event_hmac") is None:
+            result.pop("event_hmac", None)
+        return result
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CommandEvent:
@@ -66,10 +70,14 @@ class AssetEvent:
     timestamp: str
     type: str = field(default="asset", init=False)
     part: int = 1
+    event_hmac: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        return {"type": d.pop("type"), **d}
+        result = {"type": d.pop("type"), **d}
+        if result.get("event_hmac") is None:
+            result.pop("event_hmac", None)
+        return result
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AssetEvent:
@@ -85,10 +93,14 @@ class NoteEvent:
     tags: list[str] = field(default_factory=list)
     type: str = field(default="note", init=False)
     part: int = 1
+    event_hmac: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        return {"type": d.pop("type"), **d}
+        result = {"type": d.pop("type"), **d}
+        if result.get("event_hmac") is None:
+            result.pop("event_hmac", None)
+        return result
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> NoteEvent:
@@ -106,10 +118,14 @@ class ScreenshotEvent:
     timestamp: str = ""
     type: str = field(default="screenshot", init=False)
     part: int = 1
+    event_hmac: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        return {"type": d.pop("type"), **d}
+        result = {"type": d.pop("type"), **d}
+        if result.get("event_hmac") is None:
+            result.pop("event_hmac", None)
+        return result
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ScreenshotEvent:

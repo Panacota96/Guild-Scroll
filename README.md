@@ -319,6 +319,38 @@ Override the base path with `GUILD_SCROLL_DIR`.
 
 ---
 
+## Session Integrity (HMAC-SHA256)
+
+Guild Scroll provides cryptographic tamper-evidence for event logs using HMAC-SHA256 (stdlib only).
+
+### How it works
+
+When `gscroll start` creates a new session it generates a 32-byte random key stored at `{session_dir}/session.key` (permissions 0o600, readable only by the owning user). Every subsequent event written to the JSONL log — `command`, `note`, `asset`, `screenshot` — includes an `event_hmac` field: the HMAC-SHA256 hex digest of the event payload (all fields except `event_hmac` itself, serialised with sorted keys).
+
+```jsonl
+{"type": "command", "seq": 1, "command": "id", ..., "event_hmac": "3a7f..."}
+```
+
+`session_meta` records are excluded from HMAC signing because their fields (e.g. `command_count`, `end_time`) are updated in-place by `gscroll validate --repair`.
+
+### Verifying integrity
+
+```bash
+gscroll validate htb-machine
+```
+
+The validator loads `session.key`, recomputes the expected digest for every signed event, and reports any mismatch as an **error**:
+
+```
+- error: HMAC mismatch for command event (seq=3): record may have been tampered with
+```
+
+### Backward compatibility
+
+Sessions created before 0.7.0 do not have a `session.key` file and will validate cleanly — HMAC checks are skipped when the key file is absent. If events carry an `event_hmac` field but the key file is missing, the validator emits a **warning** rather than an error.
+
+---
+
 ## Roadmap
 
 ### M1 — Core ✅
