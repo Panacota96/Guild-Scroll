@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.1] — 2026-04-02
+
+### Fixed
+
+- Hardened multi-part session finalization so repeated or concurrent `finalize_session()` calls keep `session_meta.command_count` accurate.
+- Expanded merge edge-case coverage for missing part logs, empty parts, corrupted JSONL lines, preserved `parts.backup/`, and timestamp ordering.
+
+---
+
 ## [0.4.0] — 2026-04-01
 
 ### Added
