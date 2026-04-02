@@ -81,7 +81,7 @@ class TestVersionFlag:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.4.1" in result.output
+        assert "0.6.0" in result.output
 
 
 class TestUpdateCommand:
@@ -273,8 +273,26 @@ class TestExportCommand:
         content = out.read_text(encoding="utf-8")
         assert "Executive Summary" in content
 
+    def test_export_html_writeup_mode(self, isolated_sessions_dir, tmp_path):
+        from guild_scroll.config import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "writeup-html-sess")
 
-class TestReplayCommand:
+        out = tmp_path / "writeup.html"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["export", "writeup-html-sess", "--format", "html", "--writeup", "-o", str(out)],
+        )
+        assert result.exit_code == 0
+        assert out.exists()
+        content = out.read_text(encoding="utf-8")
+        assert "Executive Summary" in content
+        assert "Findings" in content
+        assert "Remediation" in content
+
+
     def test_missing_session_errors(self, isolated_sessions_dir):
         runner = CliRunner()
         result = runner.invoke(cli, ["replay", "no-such-session"])

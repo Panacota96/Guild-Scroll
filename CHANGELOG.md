@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.6.0] — 2026-04-02
+
+### Added
+
+- **CPTS-style HTML writeup mode** — `gscroll export --format html --writeup` now renders a full structured pentest report with sections: Executive Summary, Scope, Walkthrough, Reproducibility Steps, Rabbit Holes / Dead Ends, Findings, Remediation, and Appendix (`exporters/html.py`).
+- **Responsive HTML writeup layout** — writeup reports use a professional print-friendly stylesheet with responsive media queries for desktop and mobile (`_WRITEUP_CSS` in `exporters/html.py`).
+- **Summary tables in HTML writeup** — Assessment Summary section includes a commands-count table and a tools-used breakdown by phase tag.
+- **Writeup workflow documentation** — README includes a new *Writeup Workflow* section with usage examples and a section reference table.
+- **8 new tests** for HTML writeup mode — section presence, rabbit holes, reproducibility, summary tables, responsive layout, session data rendering, CLI `--writeup` flag for HTML format, and empty-session safety (`tests/test_export_html.py`, `tests/test_cli.py`).
+
+---
+
+## [0.5.0] — 2026-04-02
+
+### Added
+
+- **Output-content search filter** — `gscroll search --output-contains TEXT` filters commands by a case-insensitive substring match against captured terminal output; combines with all existing filters in AND logic (`search.py`, `cli.py`).
+
+---
+
 ## [0.4.1] — 2026-04-02
 
 ### Added
