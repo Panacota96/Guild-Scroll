@@ -1,0 +1,222 @@
+name: Docker Build & Push
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'docker/**'
+      - 'src/**'
+      - 'pyproject.toml'
+      - 'docker-compose.yml'
+      - 'k8s/**'
+      - '.github/workflows/docker-build.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'docker/**'
+      - 'src/**'
+      - 'pyproject.toml'
+
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  markdown-links:
+    name: Check Markdown Links
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate local markdown links
+        run: python scripts/check_markdown_links.py
+
+  build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    strategy:
+      matrix:
+        image:
+          - name: guild-scroll-app
+            dockerfile: docker/Dockerfile.guild-scroll
+            context: .
+          - name: guild-scroll-kali
+            dockerfile: docker/Dockerfile.kali
+            context: .
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}
+
+  scan:
+    name: Scan Docker Images (Trivy)
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name != 'pull_request'
+    
+    strategy:
+      matrix:
+        image:
+          - guild-scroll-app
+          - guild-scroll-kali
+
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
+          format: 'sarif'
+          output: 'trivy-${{ matrix.image }}.sarif'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-${{ matrix.image }}.sarif'
+
+  test-compose:
+    name: Test Docker Compose
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build images for testing
+        run: |
+          docker buildx build -t guild-scroll:test -f docker/Dockerfile.guild-scroll --load .
+          docker buildx build -t guild-scroll-kali:test -f docker/Dockerfile.kali --load .
+
+      - name: Start containers with Docker Compose
+        run: docker-compose up -d --timeout 30
+        env:
+          COMPOSE_FILE: docker-compose.yml
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for Guild Scroll app to be healthy..."
+          for i in {1..30}; do
+            if docker-compose exec -T guild-scroll-app curl -f http://localhost:8080/api/sessions; then
+              echo "Guild Scroll app is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i/30 - waiting..."
+            sleep 2
+          done
+          echo "Guild Scroll app did not become healthy"
+          docker-compose logs
+          exit 1
+
+      - name: Test Kali container
+        run: |
+          echo "Testing Kali container..."
+          docker-compose exec -T kali-recorder echo "✓ Kali container is responsive"
+          docker-compose exec -T kali-recorder gscroll list
+
+      - name: Verify session volume
+        run: |
+          docker-compose exec -T guild-scroll-app ls -la /work/guild_scroll/sessions/ || true
+
+      - name: Clean up
+        if: always()
+        run: docker-compose down -v
+
+  k8s-validate:
+    name: Validate Kubernetes Manifests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up kubeval
+        run: |
+          wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+          tar xf kubeval-linux-amd64.tar.gz
+          mv kubeval /usr/local/bin/
+
+      - name: Validate Kubernetes manifests
+        run: |
+          for file in k8s/*.yaml; do
+            echo "Validating $file..."
+            kubeval "$file" || true
+          done
+
+      - name: Validate kustomization
+        run: |
+          echo "Checking if kubectl can process kustomization..."
+          kubectl kustomize k8s/ > /tmp/kustomization-output.yaml
+          echo "✓ Kustomization is valid"
+
+  notify:
+    name: Notify Completion
+    runs-on: ubuntu-latest
+    needs: [markdown-links, build, test-compose, k8s-validate]
+    if: always()
+    
+    steps:
+      - name: Check job statuses
+        run: |
+          if [ "${{ needs.markdown-links.result }}" == "failure" ] || [ "${{ needs.build.result }}" == "failure" ] || [ "${{ needs.test-compose.result }}" == "failure" ] || [ "${{ needs.k8s-validate.result }}" == "failure" ]; then
+            echo "❌ Pipeline failed"
+            exit 1
+          else
+            echo "✓ Markdown, Docker, and K8s checks passed"
+          fi

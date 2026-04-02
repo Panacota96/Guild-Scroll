@@ -1,0 +1,37 @@
+name: Markdown Links
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - feat/**
+    paths:
+      - "**/*.md"
+      - "scripts/check_markdown_links.py"
+      - ".github/workflows/markdown-links.yml"
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "**/*.md"
+      - "scripts/check_markdown_links.py"
+      - ".github/workflows/markdown-links.yml"
+
+jobs:
+  check-markdown-links:
+    name: Check Markdown Links
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate local markdown links
+        run: python scripts/check_markdown_links.py
