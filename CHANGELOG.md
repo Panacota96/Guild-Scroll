@@ -10,11 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ### Added
 
-- **Web session cards with metadata display** — `gscroll serve` index page (`GET /`) now renders rich session cards showing session name, formatted start time, hostname, and command count; quick-action links per card: **Open Session**, **Download HTML**, **Download Markdown** (`web/app.py`).
-- **Newest-first session ordering on homepage** — sessions on `GET /` are always sorted by `start_time` descending at render time via `_session_sort_key`; the `list_sessions()` API contract is unchanged.
-- **Tolerant metadata normalization** — missing or non-numeric `command_count` (e.g. `"n/a"`) safely defaults to `0`; missing `hostname` and `start_time` fall back to display strings `"Unknown host"` and `"Unknown time"`.
-- **Correct URL encoding for session paths** — session name path segments in all card href attributes are encoded with `quote(name, safe="")` so reserved characters including `/` and `<` are percent-encoded.
-- **5 new web tests** — sort order, invalid command count handling, HTML escaping, and URL encoding assertions in `tests/test_web.py`.
+- **Operator metadata in SessionMeta** — `SessionMeta` now includes an `operator: Optional[str]` field auto-populated from the `USER`, `LOGNAME`, or `USERNAME` environment variable at session start (`log_schema.py`, `session.py`).
+- **Operator propagated to exports** — Markdown, HTML, and Obsidian exporters render the operator identity when present; the field also travels with session archives (`exporters/markdown.py`, `exporters/html.py`, `exporters/obsidian.py`).
+- **Operator tests** — tests cover metadata roundtrip, detection priority, and rendering in all three export formats (`tests/test_log_schema.py`, `tests/test_session.py`, `tests/test_export_markdown.py`, `tests/test_export_html.py`, `tests/test_export_obsidian.py`).
+- **README operator metadata note** — JSONL event table and a callout block document the operator field and its auto-detection source.
 
 ---
 
