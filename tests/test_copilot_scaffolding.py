@@ -19,7 +19,7 @@ def _frontmatter_list(frontmatter: str, key: str) -> list[str]:
     assert match is not None, f"{key} list missing from frontmatter"
     values = []
     for line in match.group(1).splitlines():
-        value = line.strip()[2:].strip()
+        value = line.strip()[2:]
         values.append(value.strip('"'))
     return values
 
