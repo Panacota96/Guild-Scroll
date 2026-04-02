@@ -283,6 +283,8 @@ def export(session_name, fmt, output_path, part_num, writeup):
         "  gscroll search htb-machine --tool nmap --exit-code 0\n"
         "  gscroll search htb-machine --cwd /var/www\n"
         "  gscroll search htb-machine --phase exploit --exit-code 0\n"
+        "  gscroll search htb-machine --output-contains 'open port'\n"
+        "  gscroll search htb-machine --tool nmap --output-contains '80/tcp'\n"
         "\n"
         "  # Inside a recording session (session auto-detected):\n"
         "  gscroll search --phase post-exploit\n"
@@ -299,7 +301,11 @@ def export(session_name, fmt, output_path, part_num, writeup):
 )
 @click.option("--exit-code", "exit_code", default=None, type=int, help="Filter by exit code.")
 @click.option("--cwd", default=None, metavar="DIR", help="Filter by working directory (substring).")
-def search(session_name, tool, phase, exit_code, cwd):
+@click.option(
+    "--output-contains", "output_contains", default=None, metavar="TEXT",
+    help="Filter by captured command output (case-insensitive substring).",
+)
+def search(session_name, tool, phase, exit_code, cwd, output_contains):
     """Search and filter commands recorded in a session.
 
     SESSION_NAME is optional when inside a recording session.
@@ -315,7 +321,7 @@ def search(session_name, tool, phase, exit_code, cwd):
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
-    filters = SearchFilter(tool=tool, phase=phase, exit_code=exit_code, cwd=cwd)
+    filters = SearchFilter(tool=tool, phase=phase, exit_code=exit_code, cwd=cwd, output_contains=output_contains)
     results = search_commands(session, filters)
 
     if not results:
