@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.7.0] — 2026-04-02
+
+### Added
+
+- **`gscroll sign [SESSION] [--key KEYFILE]`** — signs a session by computing a SHA-256 digest (or HMAC-SHA256 with a key file) over `logs/session.jsonl` and writing a `logs/session.sig` JSON metadata file containing `algorithm`, `digest`, `timestamp`, `operator`, and `signed_files` (`signer.py`, `cli.py`).
+- **`gscroll verify [SESSION] [--key KEYFILE]`** — verifies a session's signature; exits with status 1 on missing or mismatched signature, designed for CI and operator workflows (`signer.py`, `cli.py`).
+- **`signer.py`** utility module — `sign_session()` and `verify_session()` with stdlib-only HMAC/SHA-256 implementation; no additional dependencies.
+- **12 new tests** covering sign/verify pass, fail, tamper, wrong-key, algorithm-mismatch, and CLI integration (`tests/test_signing.py`).
+
+---
+
 ## [0.6.0] — 2026-04-02
 
 ### Added
