@@ -3,6 +3,7 @@ Tests for session lifecycle helpers that don't require spawning a real
 terminal (those live in the E2E tests).
 """
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -90,6 +91,44 @@ class TestFinalizeSession:
 
         finalize_session("mybox3", "test0001", logs_dir, assets_dir)
         assert not hook_file.exists()
+
+    def test_rejects_traversal_asset_hint_with_warning(self, tmp_path, isolated_sessions_dir, monkeypatch, caplog):
+        from guild_scroll.config import get_sessions_dir
+        sess_dir = _make_session(get_sessions_dir(), "mybox4")
+        logs_dir = sess_dir / "logs"
+        assets_dir = sess_dir / "assets"
+
+        work_dir = tmp_path / "work" / "a" / "b"
+        work_dir.mkdir(parents=True)
+        sensitive_file = tmp_path / "etc" / "passwd"
+        sensitive_file.parent.mkdir(parents=True)
+        sensitive_file.write_text("root:x:0:0")
+        monkeypatch.chdir(work_dir)
+
+        hook_file = logs_dir / HOOK_EVENTS_NAME
+        hook_file.write_text(
+            json.dumps({
+                "type": "command",
+                "seq": 1,
+                "command": "wget loot",
+                "timestamp_start": iso_timestamp(),
+                "timestamp_end": iso_timestamp(),
+                "exit_code": 0,
+                "working_directory": str(work_dir),
+            }) + "\n" + json.dumps({
+                "type": "asset_hint",
+                "seq": 1,
+                "trigger_command": "wget loot",
+                "original_path": "../../../etc/passwd",
+                "timestamp": iso_timestamp(),
+            }) + "\n"
+        )
+
+        with caplog.at_level(logging.WARNING):
+            finalize_session("mybox4", "test0001", logs_dir, assets_dir)
+
+        assert not any(assets_dir.iterdir())
+        assert "Rejected asset path" in caplog.text
 
 
 class TestListSessions:

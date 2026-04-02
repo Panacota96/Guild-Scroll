@@ -57,6 +57,23 @@ def detect_new_files(before: list[str], after: list[str]) -> list[str]:
     return [f for f in after if f not in before_set]
 
 
+def resolve_asset_source_path(source_path: Path, working_directory: Path) -> Optional[Path]:
+    """Resolve *source_path* relative to *working_directory* if it stays inside it."""
+    if ".." in source_path.parts:
+        return None
+    try:
+        resolved_working_directory = working_directory.resolve()
+        resolved_source = (
+            source_path.resolve() if source_path.is_absolute()
+            else (working_directory / source_path).resolve()
+        )
+    except OSError:
+        return None
+    if not resolved_source.is_relative_to(resolved_working_directory):
+        return None
+    return resolved_source
+
+
 def capture_asset(
     source_path: Path,
     assets_dir: Path,
