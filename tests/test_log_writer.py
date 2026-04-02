@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -53,22 +54,55 @@ def test_flush_after_write(tmp_path):
     w.close()
 
 
-def test_concurrent_writers_same_file_produce_valid_jsonl(tmp_path):
-    path = tmp_path / "concurrent.jsonl"
+def test_separate_instances_serialize_writes_to_same_file(tmp_path):
+    class SlowFile:
+        """Proxy that slows writes so concurrent writers would interleave without locking."""
 
-    def _writer(worker_id: int) -> None:
-        with JSONLWriter(path) as w:
-            for seq in range(100):
-                w.write({"worker": worker_id, "seq": seq})
+        def __init__(self, fh):
+            self._fh = fh
 
-    threads = [threading.Thread(target=_writer, args=(idx,)) for idx in range(4)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=5)
+        def write(self, text):
+            for char in text:
+                self._fh.write(char)
+                self._fh.flush()
+                time.sleep(0.0001)
+            return len(text)
 
+        def flush(self):
+            self._fh.flush()
+
+        def close(self):
+            self._fh.close()
+
+        def fileno(self):
+            return self._fh.fileno()
+
+    path = tmp_path / "shared.jsonl"
+    start = threading.Event()
+    errors = []
+
+    def worker(name):
+        try:
+            start.wait()
+            with JSONLWriter(path) as writer:
+                writer._fh = SlowFile(writer._fh)
+                for seq in range(5):
+                    writer.write({"worker": name, "seq": seq, "payload": "x" * 32})
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=worker, args=("a",)),
+        threading.Thread(target=worker, args=("b",)),
+    ]
+    for thread in threads:
+        thread.start()
+    start.set()
+    for thread in threads:
+        thread.join()
+
+    assert not errors
     lines = path.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 400
-
-    parsed = [json.loads(line) for line in lines]
-    assert all("worker" in record and "seq" in record for record in parsed)
+    assert len(lines) == 10
+    records = [json.loads(line) for line in lines]
+    assert {record["worker"] for record in records} == {"a", "b"}

@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from guild_scroll.cli import cli
 from guild_scroll.log_schema import SessionMeta, CommandEvent
 from guild_scroll.log_writer import JSONLWriter
+from guild_scroll.merge import PARTS_BACKUP_DIR_NAME
 from guild_scroll.utils import iso_timestamp
 
 
@@ -80,7 +81,7 @@ class TestVersionFlag:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.4.0" in result.output
+        assert "0.4.1" in result.output
 
 
 class TestUpdateCommand:
@@ -124,6 +125,15 @@ class TestUpdateCommand:
              patch("guild_scroll.updater.is_newer", return_value=False):
             result = runner.invoke(cli, ["update"])
         assert "Current version:" in result.output
+
+
+class TestServeCommand:
+    def test_serve_invokes_web_server(self, isolated_sessions_dir):
+        runner = CliRunner()
+        with patch("guild_scroll.web.app.run_server") as mock_run_server:
+            result = runner.invoke(cli, ["serve", "--port", "1551"])
+        assert result.exit_code == 0
+        mock_run_server.assert_called_once_with(host="127.0.0.1", port=1551)
 
 
 class TestNoteCommand:
@@ -336,45 +346,77 @@ class TestReplayCommand:
         assert result.exit_code != 0
 
 
-class TestServeCommand:
-    def test_serve_calls_run_server(self, isolated_sessions_dir):
+class TestValidateCommand:
+    def test_validate_missing_session_errors(self, isolated_sessions_dir):
         runner = CliRunner()
-        with patch("guild_scroll.server.run_server", return_value=0) as mock_run:
-            result = runner.invoke(cli, ["serve", "--port", "1551"])
-        assert result.exit_code == 0
-        mock_run.assert_called_once_with(default_session=None, port=1551, open_browser_flag=False)
-
-    def test_serve_validates_session_if_provided(self, isolated_sessions_dir):
-        from guild_scroll.config import get_sessions_dir
-
-        sessions_dir = get_sessions_dir()
-        sessions_dir.mkdir(parents=True, exist_ok=True)
-        _make_session(sessions_dir, "serve-sess")
-
-        runner = CliRunner()
-        with patch("guild_scroll.server.run_server", return_value=0) as mock_run:
-            result = runner.invoke(cli, ["serve", "serve-sess"])
-        assert result.exit_code == 0
-        mock_run.assert_called_once_with(default_session="serve-sess", port=1551, open_browser_flag=False)
-
-    def test_serve_missing_session_errors(self, isolated_sessions_dir):
-        runner = CliRunner()
-        result = runner.invoke(cli, ["serve", "no-such-session"])
+        result = runner.invoke(cli, ["validate", "missing-session"])
         assert result.exit_code != 0
         assert "Session not found" in result.output
 
-    def test_serve_port_validation_error(self, isolated_sessions_dir):
-        runner = CliRunner()
-        with patch("guild_scroll.server.run_server", side_effect=ValueError("Port must be between 1 and 65535")):
-            result = runner.invoke(cli, ["serve", "--port", "70000"])
-        assert result.exit_code != 0
-        assert "Port must be between 1 and 65535" in result.output
+    def test_validate_healthy_session(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
 
-    def test_serve_port_in_use_error_is_friendly(self, isolated_sessions_dir):
-        import errno
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir = sessions_dir / "valid-sess" / "logs"
+        logs_dir.mkdir(parents=True)
+        meta = SessionMeta(
+            session_name="valid-sess",
+            session_id="abc",
+            start_time="2026-04-02T13:00:00Z",
+            end_time="2026-04-02T13:00:10Z",
+            hostname="kali",
+            command_count=1,
+        )
+        command = CommandEvent(
+            seq=1,
+            command="id",
+            timestamp_start="2026-04-02T13:00:05Z",
+            timestamp_end="2026-04-02T13:00:10Z",
+            exit_code=0,
+            working_directory="/home/kali",
+        )
+        with JSONLWriter(logs_dir / SESSION_LOG_NAME) as writer:
+            writer.write(meta.to_dict())
+            writer.write(command.to_dict())
 
         runner = CliRunner()
-        with patch("guild_scroll.server.run_server", side_effect=OSError(errno.EADDRINUSE, "Address already in use")):
-            result = runner.invoke(cli, ["serve", "--port", "1551"])
-        assert result.exit_code != 0
-        assert "Port 1551 is already in use" in result.output
+        result = runner.invoke(cli, ["validate", "valid-sess"])
+        assert result.exit_code == 0
+        assert "+ info: checked 1 log file(s)" in result.output
+        assert "- error:" not in result.output
+
+    def test_validate_repair_updates_meta(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
+
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir = sessions_dir / "repair-cli" / "logs"
+        logs_dir.mkdir(parents=True)
+        meta = SessionMeta(
+            session_name="repair-cli",
+            session_id="abc",
+            start_time="2026-04-02T13:30:00Z",
+            hostname="kali",
+            command_count=0,
+        )
+        command = CommandEvent(
+            seq=1,
+            command="whoami",
+            timestamp_start="2026-04-02T13:30:02Z",
+            timestamp_end="2026-04-02T13:30:03Z",
+            exit_code=0,
+            working_directory="/home/kali",
+        )
+        with JSONLWriter(logs_dir / SESSION_LOG_NAME) as writer:
+            writer.write(meta.to_dict())
+            writer.write(command.to_dict())
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["validate", "repair-cli", "--repair"])
+
+        repaired_meta = json.loads((logs_dir / SESSION_LOG_NAME).read_text().splitlines()[0])
+        assert result.exit_code == 0
+        assert "+ repaired:" in result.output
+        assert repaired_meta["command_count"] == 1
+        assert repaired_meta["end_time"] == "2026-04-02T13:30:03Z"

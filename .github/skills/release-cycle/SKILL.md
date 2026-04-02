@@ -1,17 +1,13 @@
 ---
 name: release-cycle
-description: "Use when: executing a patch/minor/major release workflow end-to-end."
-user-invocable: true
+description: Run the Guild Scroll release checklist for patch, minor, or major updates.
 ---
 
-# Release Cycle
-
-Run the release checklist consistently.
+Use `/release patch`, `/release minor`, or `/release major` to prepare a release.
 
 ## Steps
-
-1. Pick bump type and target version.
-2. Sync all version locations.
-3. Validate changelog and README updates.
-4. Run tests.
-5. Prepare release notes summary.
+1. Determine the target version from the requested release type.
+2. Update the 4-file version sync set: `src/guild_scroll/__init__.py`, `pyproject.toml`, `README.md`, and `tests/test_cli.py`.
+3. Add the release notes to `CHANGELOG.md`.
+4. Validate that the `CHANGELOG.md` entry exists **before tagging** or finalizing the release.
+5. Re-check the README badge and contributor guidance before announcing the release.

@@ -1,27 +1,17 @@
-# Security Model
+# Security
 
-Guild Scroll stores potentially sensitive terminal session artifacts. This project follows a local-first design.
+## Localhost-only web server
 
-## Localhost-only web mode
+`gscroll serve` is intentionally limited to `127.0.0.1`. It is designed for local review on the same machine that recorded the session and must not be exposed on shared interfaces.
 
-- `gscroll serve` binds to `127.0.0.1` only.
-- The server is intended for local use with no authentication layer.
-- Session names are validated and resolved under the sessions directory to prevent path traversal and symlink escape.
+## No authentication by design
 
-## Data sensitivity
+The local web viewer does not implement authentication, authorization, or multi-user isolation. This is acceptable only because the server is restricted to localhost and is meant for a single trusted operator.
 
-Session logs may contain secrets, tokens, hostnames, and command output. Treat exported reports and archives as sensitive.
+## Session data sensitivity
 
-## Headers and browser behavior
+Guild Scroll sessions can contain command history, terminal output, notes, paths, hostnames, and exported report content. Treat the `guild_scroll/` directory and any browser session displaying it as sensitive pentest/CTF data.
 
-The local web server returns conservative headers:
+## Browser handling
 
-- `Cache-Control: no-store`
-- `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
-
-## Reporting vulnerabilities
-
-Please report vulnerabilities via GitHub Security Advisories:
-
-https://github.com/Panacota96/Guild-Scroll/security/advisories/new
+The web server sends anti-caching and framing/type-sniffing headers for HTML and JSON responses, but local operators should still close the viewer when finished and avoid using it on untrusted systems.

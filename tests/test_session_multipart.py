@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME, PARTS_DIR_NAME
-from guild_scroll.log_schema import SessionMeta, CommandEvent
+from guild_scroll.log_schema import SessionMeta, CommandEvent, ScreenshotEvent
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.session import finalize_session
 from guild_scroll.session_loader import load_session
@@ -120,6 +120,25 @@ class TestMultiPartLoading:
         p2_cmds = [c for c in loaded.commands if c.command == "cmd-p2"]
         assert p1_cmds[0].part == 1
         assert p2_cmds[0].part == 2
+
+    def test_screenshot_part_field_set_correctly(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        sess_dir = _make_session(sessions_dir, "screenshot-parts-check")
+        part_dir = _make_part(sess_dir, 2, [])
+        screenshot = ScreenshotEvent(
+            seq=1,
+            event_type="flag",
+            trigger_command="cat /root/flag.txt",
+            screenshot_path="screenshots/flag.png",
+            timestamp="2026-04-01T10:02:00Z",
+        )
+        with JSONLWriter(part_dir / SESSION_LOG_NAME) as w:
+            w.write(screenshot.to_dict())
+
+        loaded = load_session("screenshot-parts-check")
+        assert len(loaded.screenshots) == 1
+        assert loaded.screenshots[0].part == 2
 
     def test_raw_io_paths_populated(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()

@@ -1,8 +1,13 @@
-# Guild Scroll Shared Copilot Instructions
+# Repository Copilot Guidance
 
-- Follow TDD: add or update tests before implementing behavior changes.
-- Keep core modules stdlib-only (except click and optional textual).
-- For CLI commands in src/guild_scroll/cli.py, keep imports lazy inside command functions.
-- Preserve type-first serialization for JSONL events.
-- Before release commits, synchronize versions in src/guild_scroll/__init__.py, pyproject.toml, README badge, and tests/test_cli.py.
-- Prefer issue-driven delivery: link implementation PRs to milestone issues.
+Use the shared repository guidance in `.github/` before falling back to personal-only setup.
+
+- Auto-loaded file guidance lives in `.github/instructions/`.
+- Shared reviewer and maintenance personas live in `.github/agents/`.
+- Reusable slash-command workflows live in `.github/skills/`.
+- The version guard is documented in `.github/hooks/version-check.json`.
+
+Contributor expectations:
+- Follow TDD: update tests with behavior changes.
+- Keep release work aligned with the 4-file version sync requirement.
+- Use `/issue` for structured issue drafts and `/release` for the release checklist.
