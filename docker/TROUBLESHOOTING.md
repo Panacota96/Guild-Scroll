@@ -49,7 +49,7 @@ docker-compose up -d
 
 ```bash
 cd Guild-Scroll
-git pull origin feat/m5-39-operator-metadata
+git pull
 ```
 
 ### 2️⃣ Start with Docker Compose
