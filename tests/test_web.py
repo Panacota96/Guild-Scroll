@@ -63,7 +63,7 @@ class TestIsSafeSessionName:
         assert not _is_safe_session_name("nested/session")
         assert not _is_safe_session_name(r"nested\session")
 
-    def test_rejects_symlink_that_resolves_outside_sessions_dir(self, isolated_sessions_dir, tmp_path):
+    def test_rejects_external_symlink(self, isolated_sessions_dir, tmp_path):
         sessions_dir = get_sessions_dir()
         sessions_dir.mkdir(parents=True, exist_ok=True)
         outside = tmp_path / "outside-session"
@@ -97,7 +97,7 @@ class TestCreateServer:
             assert headers["X-Content-Type-Options"] == "nosniff"
             assert headers["X-Frame-Options"] == "DENY"
 
-    def test_invalid_session_returns_json_error_without_500(self, isolated_sessions_dir):
+    def test_traversal_attempt_returns_400_with_json_error(self, isolated_sessions_dir):
         with _running_server() as server:
             status, headers, body = _request(server, "/api/session/../escape")
 

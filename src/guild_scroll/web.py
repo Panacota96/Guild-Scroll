@@ -104,18 +104,18 @@ def _render_session_html(session_name: str) -> str | None:
         return output.read_text(encoding="utf-8")
 
 
-def _render_report_document(session_name: str, fmt: str) -> str | None:
+def _render_report_document(session_name: str, report_format: str) -> str | None:
     sess_dir = _safe_session_dir(session_name)
     if sess_dir is None:
         return None
 
     session = load_session(session_name)
-    suffix = ".md" if fmt == "md" else ".html"
+    suffix = ".md" if report_format == "md" else ".html"
     with tempfile.TemporaryDirectory() as tmp_dir:
         output = Path(tmp_dir) / f"{session_name}{suffix}"
-        if fmt == "md":
+        if report_format == "md":
             export_markdown(session, output)
-        elif fmt == "html":
+        elif report_format == "html":
             export_html(session, output)
         else:
             return None
@@ -177,16 +177,16 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 if "/" in session_name:
                     self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid session name."})
                     return
-                fmt = parse_qs(parsed.query).get("format", ["md"])[0]
-                document = _render_report_document(session_name, fmt)
+                report_format = parse_qs(parsed.query).get("format", ["md"])[0]
+                document = _render_report_document(session_name, report_format)
                 if document is None:
-                    status = HTTPStatus.BAD_REQUEST if fmt not in {"md", "html"} else HTTPStatus.NOT_FOUND
-                    message = "Invalid format." if fmt not in {"md", "html"} else "Session not found."
+                    status = HTTPStatus.BAD_REQUEST if report_format not in {"md", "html"} else HTTPStatus.NOT_FOUND
+                    message = "Invalid format." if report_format not in {"md", "html"} else "Session not found."
                     self._send_json(status, {"error": message})
                     return
                 self._send_json(
                     HTTPStatus.OK,
-                    {"session": session_name, "format": fmt, "preview": document[:400]},
+                    {"session": session_name, "format": report_format, "preview": document[:400]},
                 )
                 return
 
