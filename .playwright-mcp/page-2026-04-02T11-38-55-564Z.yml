@@ -1,0 +1,122 @@
+- generic [active] [ref=e1]:
+  - 'heading "Session: test" [level=1] [ref=e2]'
+  - paragraph [ref=e3]: "Commands in report: 5 | Preview format: html"
+  - generic [ref=e4]:
+    - link "HTML preview" [ref=e5] [cursor=pointer]:
+      - /url: /session/test?format=html
+    - link "Markdown preview" [ref=e6] [cursor=pointer]:
+      - /url: /session/test?format=md
+    - link "Download HTML" [ref=e7] [cursor=pointer]:
+      - /url: /api/session/test/download?format=html
+    - link "Download Markdown" [ref=e8] [cursor=pointer]:
+      - /url: /api/session/test/download?format=md
+  - iframe [ref=e9]:
+    - generic [active] [ref=f4e1]:
+      - 'heading "Session: test" [level=1] [ref=f4e2]'
+      - paragraph [ref=f4e3]:
+        - strong [ref=f4e4]: "Host:"
+        - text: DESKTOP-I52J8IO |
+        - strong [ref=f4e5]: "Date:"
+        - text: 2026-03-31T23:34:41.953382+00:00 |
+        - strong [ref=f4e6]: "Duration:"
+        - text: 1m 30s |
+        - strong [ref=f4e7]: "Commands:"
+        - text: "5"
+      - heading "Timeline" [level=2] [ref=f4e8]
+      - table [ref=f4e9]:
+        - rowgroup [ref=f4e10]:
+          - row "# Time Command Exit Dir Tag" [ref=f4e11]:
+            - columnheader "#" [ref=f4e12]
+            - columnheader "Time" [ref=f4e13]
+            - columnheader "Command" [ref=f4e14]
+            - columnheader "Exit" [ref=f4e15]
+            - columnheader "Dir" [ref=f4e16]
+            - columnheader "Tag" [ref=f4e17]
+          - row "1 00:08 whoami 0 /home/daviv —" [ref=f4e18]:
+            - cell "1" [ref=f4e19]
+            - cell "00:08" [ref=f4e20]
+            - cell "whoami" [ref=f4e21]:
+              - code [ref=f4e22]: whoami
+            - cell "0" [ref=f4e23]
+            - cell "/home/daviv" [ref=f4e24]
+            - cell "—" [ref=f4e25]
+          - row "2 00:11 id 0 /home/daviv —" [ref=f4e26]:
+            - cell "2" [ref=f4e27]
+            - cell "00:11" [ref=f4e28]
+            - cell "id" [ref=f4e29]:
+              - code [ref=f4e30]: id
+            - cell "0" [ref=f4e31]
+            - cell "/home/daviv" [ref=f4e32]
+            - cell "—" [ref=f4e33]
+          - row "3 00:46 gscroll export --help 0 /home/daviv —" [ref=f4e34]:
+            - cell "3" [ref=f4e35]
+            - cell "00:46" [ref=f4e36]
+            - cell "gscroll export --help" [ref=f4e37]:
+              - code [ref=f4e38]: gscroll export --help
+            - cell "0" [ref=f4e39]
+            - cell "/home/daviv" [ref=f4e40]
+            - cell "—" [ref=f4e41]
+          - row "4 01:12 gscroll export --format html -o report.html 0 /home/daviv —" [ref=f4e42]:
+            - cell "4" [ref=f4e43]
+            - cell "01:12" [ref=f4e44]
+            - cell "gscroll export --format html -o report.html" [ref=f4e45]:
+              - code [ref=f4e46]: gscroll export --format html -o report.html
+            - cell "0" [ref=f4e47]
+            - cell "/home/daviv" [ref=f4e48]
+            - cell "—" [ref=f4e49]
+          - row "5 01:24 ping -c4 8.8.8.8 0 /home/daviv —" [ref=f4e50]:
+            - cell "5" [ref=f4e51]
+            - cell "01:24" [ref=f4e52]
+            - cell "ping -c4 8.8.8.8" [ref=f4e53]:
+              - code [ref=f4e54]: ping -c4 8.8.8.8
+            - cell "0" [ref=f4e55]
+            - cell "/home/daviv" [ref=f4e56]
+            - cell "—" [ref=f4e57]
+      - heading "Command Details" [level=2] [ref=f4e58]
+      - generic [ref=f4e59]:
+        - heading "[1] whoami" [level=3] [ref=f4e60]:
+          - text: "[1]"
+          - code [ref=f4e61]: whoami
+        - paragraph [ref=f4e62]: "Time: 00:08 | Exit: 0 | Tag: — | Dir: /home/daviv"
+        - generic [ref=f4e63]: daviv %
+      - generic [ref=f4e64]:
+        - heading "[2] id" [level=3] [ref=f4e65]:
+          - text: "[2]"
+          - code [ref=f4e66]: id
+        - paragraph [ref=f4e67]: "Time: 00:11 | Exit: 0 | Tag: — | Dir: /home/daviv"
+        - generic [ref=f4e68]: uid=1000(daviv) gid=1000(daviv) groups=1000(daviv),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),100(users),110(docker),987(ollama) %
+      - generic [ref=f4e69]:
+        - heading "[3] gscroll export --help" [level=3] [ref=f4e70]:
+          - text: "[3]"
+          - code [ref=f4e71]: gscroll export --help
+        - paragraph [ref=f4e72]: "Time: 00:46 | Exit: 0 | Tag: — | Dir: /home/daviv"
+        - generic [ref=f4e73]: "Usage: gscroll export [OPTIONS] [SESSION_NAME] Export a recorded session to Markdown, HTML, or asciicast format. SESSION_NAME is optional when inside a recording session. Options: --format [md|html|cast] Output format: md (Markdown), html (self-contained HTML), or cast (asciicast v2). [required] -o, --output PATH Output file path. Defaults to <session>.<ext> in the current directory. --help Show this message and exit. Examples: gscroll export htb-machine --format md gscroll export htb-machine --format html -o report.html gscroll export htb-machine --format cast -o session.cast # Inside a recording session (session auto-detected): gscroll export --format md Formats: md Markdown report with timeline table and command outputs html Self-contained HTML report with color-coded phases cast Asciicast v2 (.cast) playable with asciinema %"
+      - generic [ref=f4e74]:
+        - heading "[4] gscroll export --format html -o report.html" [level=3] [ref=f4e75]:
+          - text: "[4]"
+          - code [ref=f4e76]: gscroll export --format html -o report.html
+        - paragraph [ref=f4e77]: "Time: 01:12 | Exit: 0 | Tag: — | Dir: /home/daviv"
+        - generic [ref=f4e78]: "[gscroll] Exported to report.html %"
+      - generic [ref=f4e79]:
+        - heading "[5] ping -c4 8.8.8.8" [level=3] [ref=f4e80]:
+          - text: "[5]"
+          - code [ref=f4e81]: ping -c4 8.8.8.8
+        - paragraph [ref=f4e82]: "Time: 01:24 | Exit: 0 | Tag: — | Dir: /home/daviv"
+        - generic [ref=f4e83]: "PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data. 64 bytes from 8.8.8.8: icmp_seq=1 ttl=113 time=3.69 ms 64 bytes from 8.8.8.8: icmp_seq=2 ttl=113 time=5.06 ms 64 bytes from 8.8.8.8: icmp_seq=3 ttl=113 time=5.54 ms 64 bytes from 8.8.8.8: icmp_seq=4 ttl=113 time=4.37 ms --- 8.8.8.8 ping statistics --- 4 packets transmitted, 4 received, 0% packet loss, time 3005ms rtt min/avg/max/mdev = 3.692/4.663/5.537/0.698 ms %"
+      - heading "Notes" [level=2] [ref=f4e84]
+      - group [ref=f4e85]:
+        - generic "0 note(s)" [ref=f4e86] [cursor=pointer]
+        - paragraph [ref=f4e87]:
+          - emphasis [ref=f4e88]: No notes.
+      - heading "Assets" [level=2] [ref=f4e89]
+      - table [ref=f4e90]:
+        - rowgroup [ref=f4e91]:
+          - row "File Type Trigger" [ref=f4e92]:
+            - columnheader "File" [ref=f4e93]
+            - columnheader "Type" [ref=f4e94]
+            - columnheader "Trigger" [ref=f4e95]
+          - row "report.html download gscroll export --format html -o report.html" [ref=f4e96]:
+            - cell "report.html" [ref=f4e97]
+            - cell "download" [ref=f4e98]
+            - cell "gscroll export --format html -o report.html" [ref=f4e99]:
+              - code [ref=f4e100]: gscroll export --format html -o report.html

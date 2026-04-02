@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Session: test</title>
+<style>
+body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; margin: 2rem; }
+h1 { color: #00d4ff; }
+h2 { color: #a0cfff; border-bottom: 1px solid #333; padding-bottom: 4px; }
+.meta { color: #aaa; margin-bottom: 1.5rem; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
+th { background: #16213e; color: #00d4ff; padding: 6px 10px; text-align: left; }
+td { padding: 5px 10px; border-bottom: 1px solid #2a2a4a; }
+tr:hover td { background: #0f3460; }
+code { background: #0d0d1a; padding: 2px 5px; border-radius: 3px; color: #7fff7f; }
+.tag-recon    { background: #1a3a6e; color: #7fb3ff; padding: 2px 6px; border-radius: 10px; }
+.tag-exploit  { background: #5a0000; color: #ff7f7f; padding: 2px 6px; border-radius: 10px; }
+.tag-post-exploit { background: #4a2a00; color: #ffb347; padding: 2px 6px; border-radius: 10px; }
+.tag-none     { color: #555; }
+details summary { cursor: pointer; color: #a0cfff; }
+.note { margin: 4px 0; }
+.note-tag { color: #7fb3ff; font-size: 0.85em; }
+.cmd-detail { margin-bottom: 1rem; border-left: 3px solid #333; padding-left: 1rem; }
+.cmd-detail h3 { color: #7fff7f; margin-bottom: 4px; }
+.cmd-meta { color: #aaa; font-size: 0.85em; margin-bottom: 6px; }
+pre.cmd-output { background: #0d0d1a; padding: 10px; border-radius: 4px;
+                 overflow-x: auto; white-space: pre-wrap; margin: 0; }
+</style>
+</head>
+<body>
+<h1>Session: test</h1>
+<p class="meta">
+  <strong>Host:</strong> DESKTOP-I52J8IO &nbsp;|&nbsp;
+  <strong>Date:</strong> 2026-03-31T23:34:41.953382+00:00 &nbsp;|&nbsp;
+  <strong>Duration:</strong> 1m 30s &nbsp;|&nbsp;
+  <strong>Commands:</strong> 5
+</p>
+
+<h2>Timeline</h2>
+<table>
+<tr><th>#</th><th>Time</th><th>Command</th><th>Exit</th><th>Dir</th><th>Tag</th></tr>
+<tr><td>1</td><td>00:08</td><td><code>whoami</code></td><td>0</td><td>/home/daviv</td><td><span class="tag-none">—</span></td></tr>
+<tr><td>2</td><td>00:11</td><td><code>id</code></td><td>0</td><td>/home/daviv</td><td><span class="tag-none">—</span></td></tr>
+<tr><td>3</td><td>00:46</td><td><code>gscroll export --help</code></td><td>0</td><td>/home/daviv</td><td><span class="tag-none">—</span></td></tr>
+<tr><td>4</td><td>01:12</td><td><code>gscroll export --format html -o report.html</code></td><td>0</td><td>/home/daviv</td><td><span class="tag-none">—</span></td></tr>
+<tr><td>5</td><td>01:24</td><td><code>ping -c4 8.8.8.8</code></td><td>0</td><td>/home/daviv</td><td><span class="tag-none">—</span></td></tr>
+</table>
+
+<h2>Command Details</h2>
+<div class="cmd-detail"><h3>[1] <code>whoami</code></h3><p class="cmd-meta">Time: 00:08 &nbsp;|&nbsp; Exit: 0 &nbsp;|&nbsp; Tag: <span class="tag-none">—</span> &nbsp;|&nbsp; Dir: /home/daviv</p><pre class="cmd-output">daviv
+%</pre></div>
+<div class="cmd-detail"><h3>[2] <code>id</code></h3><p class="cmd-meta">Time: 00:11 &nbsp;|&nbsp; Exit: 0 &nbsp;|&nbsp; Tag: <span class="tag-none">—</span> &nbsp;|&nbsp; Dir: /home/daviv</p><pre class="cmd-output">uid=1000(daviv) gid=1000(daviv) groups=1000(daviv),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),100(users),110(docker),987(ollama)
+%</pre></div>
+<div class="cmd-detail"><h3>[3] <code>gscroll export --help</code></h3><p class="cmd-meta">Time: 00:46 &nbsp;|&nbsp; Exit: 0 &nbsp;|&nbsp; Tag: <span class="tag-none">—</span> &nbsp;|&nbsp; Dir: /home/daviv</p><pre class="cmd-output">Usage: gscroll export [OPTIONS] [SESSION_NAME]
+
+  Export a recorded session to Markdown, HTML, or asciicast format.
+
+  SESSION_NAME is optional when inside a recording session.
+
+Options:
+  --format [md|html|cast]  Output format: md (Markdown), html (self-contained
+                           HTML), or cast (asciicast v2).  [required]
+  -o, --output PATH        Output file path. Defaults to &lt;session&gt;.&lt;ext&gt; in
+                           the current directory.
+  --help                   Show this message and exit.
+
+  Examples:
+    gscroll export htb-machine --format md
+    gscroll export htb-machine --format html -o report.html
+    gscroll export htb-machine --format cast -o session.cast
+
+    # Inside a recording session (session auto-detected):   gscroll export
+    --format md
+
+  Formats:   md    Markdown report with timeline table and command outputs
+  html  Self-contained HTML report with color-coded phases   cast  Asciicast
+  v2 (.cast) playable with asciinema
+%</pre></div>
+<div class="cmd-detail"><h3>[4] <code>gscroll export --format html -o report.html</code></h3><p class="cmd-meta">Time: 01:12 &nbsp;|&nbsp; Exit: 0 &nbsp;|&nbsp; Tag: <span class="tag-none">—</span> &nbsp;|&nbsp; Dir: /home/daviv</p><pre class="cmd-output">[gscroll] Exported to report.html
+%</pre></div>
+<div class="cmd-detail"><h3>[5] <code>ping -c4 8.8.8.8</code></h3><p class="cmd-meta">Time: 01:24 &nbsp;|&nbsp; Exit: 0 &nbsp;|&nbsp; Tag: <span class="tag-none">—</span> &nbsp;|&nbsp; Dir: /home/daviv</p><pre class="cmd-output">PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=113 time=3.69 ms
+64 bytes from 8.8.8.8: icmp_seq=2 ttl=113 time=5.06 ms
+64 bytes from 8.8.8.8: icmp_seq=3 ttl=113 time=5.54 ms
+64 bytes from 8.8.8.8: icmp_seq=4 ttl=113 time=4.37 ms
+
+--- 8.8.8.8 ping statistics ---
+4 packets transmitted, 4 received, 0% packet loss, time 3005ms
+rtt min/avg/max/mdev = 3.692/4.663/5.537/0.698 ms
+%</pre></div>
+
+<h2>Notes</h2>
+<details open>
+<summary>0 note(s)</summary>
+<p><em>No notes.</em></p>
+</details>
+
+<h2>Assets</h2>
+<table><tr><th>File</th><th>Type</th><th>Trigger</th></tr><tr><td>report.html</td><td>download</td><td><code>gscroll export --format html -o report.html</code></td></tr></table>
+</body>
+</html>

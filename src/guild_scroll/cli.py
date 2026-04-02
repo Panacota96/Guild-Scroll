@@ -202,6 +202,7 @@ def note(text, session_name, tags):
         "\b\n"
         "Examples:\n"
         "  gscroll export htb-machine --format md\n"
+        "  gscroll export htb-machine --format md --writeup\n"
         "  gscroll export htb-machine --format html -o report.html\n"
         "  gscroll export htb-machine --format cast -o session.cast\n"
         "\n"
@@ -229,7 +230,11 @@ def note(text, session_name, tags):
     "--part", "part_num", default=None, type=int, metavar="N",
     help="For cast format: which terminal part to export (default: 1).",
 )
-def export(session_name, fmt, output_path, part_num):
+@click.option(
+    "--writeup", is_flag=True,
+    help="Generate a structured client report skeleton (supported for md/html).",
+)
+def export(session_name, fmt, output_path, part_num, writeup):
     """Export a recorded session to Markdown, HTML, asciicast, or Obsidian format.
 
     SESSION_NAME is optional when inside a recording session.
@@ -259,10 +264,10 @@ def export(session_name, fmt, output_path, part_num):
 
         if fmt == "md":
             from guild_scroll.exporters.markdown import export_markdown
-            export_markdown(session, out)
+            export_markdown(session, out, writeup=writeup)
         elif fmt == "html":
             from guild_scroll.exporters.html import export_html
-            export_html(session, out)
+            export_html(session, out, writeup=writeup)
         elif fmt == "cast":
             from guild_scroll.exporters.cast import export_cast
             export_cast(session, out, part=part_num or 1)

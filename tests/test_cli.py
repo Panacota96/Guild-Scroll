@@ -256,6 +256,23 @@ class TestExportCommand:
         result = runner.invoke(cli, ["export", "--format", "md"])
         assert result.exit_code != 0
 
+    def test_export_md_writeup_mode(self, isolated_sessions_dir, tmp_path):
+        from guild_scroll.config import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "writeup-sess")
+
+        out = tmp_path / "writeup.md"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["export", "writeup-sess", "--format", "md", "--writeup", "-o", str(out)],
+        )
+        assert result.exit_code == 0
+        assert out.exists()
+        content = out.read_text(encoding="utf-8")
+        assert "Executive Summary" in content
+
 
 class TestReplayCommand:
     def test_missing_session_errors(self, isolated_sessions_dir):

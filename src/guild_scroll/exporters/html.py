@@ -99,7 +99,7 @@ def _tag_badge(tag: str | None) -> str:
     return f'<span class="{html.escape(css_class)}">{html.escape(tag)}</span>'
 
 
-def export_html(session: LoadedSession, output: Path) -> None:
+def export_html(session: LoadedSession, output: Path, writeup: bool = False) -> None:
     """Write a self-contained HTML report of *session* to *output*."""
     meta = session.meta
 

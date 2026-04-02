@@ -121,3 +121,36 @@ class TestExportMarkdown:
         export_markdown(session, out)
         content = out.read_text()
         assert "daviv" in content
+
+    def test_writeup_mode_contains_cpts_style_sections(self, tmp_path):
+        cmd = CommandEvent(
+            seq=1, command="nmap -sV 10.0.0.1",
+            timestamp_start="2026-03-31T12:00:05Z",
+            timestamp_end="2026-03-31T12:00:15Z",
+            exit_code=0, working_directory="/home/kali",
+        )
+        session = _make_session(tmp_path, commands=[cmd])
+        out = tmp_path / "writeup.md"
+        export_markdown(session, out, writeup=True)
+        content = out.read_text()
+
+        assert "# Penetration Test" in content
+        assert "## Executive Summary" in content
+        assert "## Internal Network Compromise Walkthrough" in content
+        assert "## Remediation Summary" in content
+        assert "## Technical Findings Details" in content
+
+    def test_writeup_mode_includes_rabbit_holes_section(self, tmp_path):
+        failed = CommandEvent(
+            seq=2, command="sqlmap -u http://target/login.php --batch",
+            timestamp_start="2026-03-31T12:02:05Z",
+            timestamp_end="2026-03-31T12:02:25Z",
+            exit_code=1, working_directory="/home/kali",
+        )
+        session = _make_session(tmp_path, commands=[failed])
+        out = tmp_path / "writeup.md"
+        export_markdown(session, out, writeup=True)
+        content = out.read_text()
+
+        assert "### Rabbit Holes and Dead Ends" in content
+        assert "sqlmap -u http://target/login.php --batch" in content

@@ -1,0 +1,6 @@
+- generic [active] [ref=e1]:
+  - heading "Guild Scroll Sessions" [level=1] [ref=e2]
+  - list [ref=e3]:
+    - listitem [ref=e4]:
+      - link "test" [ref=e5] [cursor=pointer]:
+        - /url: /session/test
