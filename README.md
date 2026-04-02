@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.4.0-green)
+![Version](https://img.shields.io/badge/version-0.5.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -45,6 +45,7 @@ gscroll export --format md   # structured report, ready to share
 | **Search** | `gscroll search --tool nmap --phase recon --exit-code 0` |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
+| **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API |
 | **Session auto-detect** | All sub-commands pick up `GUILD_SCROLL_SESSION` automatically |
 | **Self-update** | `gscroll update` checks GitHub and reinstalls |
 
@@ -171,6 +172,9 @@ gscroll replay --speed 2.0
 
 # Interactive TUI dashboard
 gscroll tui htb-machine
+
+# Local web preview
+gscroll serve
 
 # List all sessions
 gscroll list

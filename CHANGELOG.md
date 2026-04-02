@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.5.0] — 2026-04-02
+
+### Added
+
+- **`gscroll serve`** — localhost-only HTML viewer and JSON API for recorded sessions, implemented with the Python standard library.
+- **`SECURITY.md`** — documents the localhost-only threat model, lack of authentication, and session-data sensitivity for the web viewer.
+
+### Fixed
+
+- **Serve path hardening** — safe-session validation now rejects traversal strings and symlink resolutions that escape the sessions directory.
+- **Serve bind hardening** — `create_server()` rejects non-`127.0.0.1` hosts and the CLI reports a friendly `Port N already in use` error.
+- **Serve response hardening** — HTML and JSON responses now send `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, and `X-Frame-Options: DENY`.
+- **Serve regression coverage** — added symlink traversal, localhost-only bind, response-header, and 100-case fuzz tests to prevent 500s on malformed paths.
+
+---
+
 ## [0.4.0] — 2026-04-01
 
 ### Added
