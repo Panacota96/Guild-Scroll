@@ -109,6 +109,7 @@ class TestMergeParts:
         log_file = sess_dir / "logs" / SESSION_LOG_NAME
         records = _read_records(log_file)
         commands = [r for r in records if r["type"] == "command"]
+        assert meta["command_count"] == 2
         assert len(commands) == 2
 
     def test_merge_missing_part_session_jsonl_is_ignored(self, isolated_sessions_dir):

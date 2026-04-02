@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from guild_scroll.cli import cli
 from guild_scroll.log_schema import SessionMeta, CommandEvent
 from guild_scroll.log_writer import JSONLWriter
+from guild_scroll.merge import PARTS_BACKUP_DIR_NAME
 from guild_scroll.utils import iso_timestamp
 
 
