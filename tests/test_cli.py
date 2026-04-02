@@ -80,7 +80,7 @@ class TestVersionFlag:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.5.0" in result.output
+        assert "0.4.1" in result.output
 
 
 class TestUpdateCommand:
@@ -124,6 +124,15 @@ class TestUpdateCommand:
              patch("guild_scroll.updater.is_newer", return_value=False):
             result = runner.invoke(cli, ["update"])
         assert "Current version:" in result.output
+
+
+class TestServeCommand:
+    def test_serve_invokes_web_server(self, isolated_sessions_dir):
+        runner = CliRunner()
+        with patch("guild_scroll.web.app.run_server") as mock_run_server:
+            result = runner.invoke(cli, ["serve", "--port", "1551"])
+        assert result.exit_code == 0
+        mock_run_server.assert_called_once_with(host="127.0.0.1", port=1551)
 
 
 class TestNoteCommand:

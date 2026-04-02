@@ -8,8 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
 
-from guild_scroll.config import RAW_IO_LOG_NAME
-from guild_scroll.exporters.output_extractor import extract_command_outputs
+from guild_scroll.exporters.output_extractor import build_command_output_map
 from guild_scroll.session_loader import LoadedSession
 from guild_scroll.tool_tagger import tag_command
 
@@ -145,15 +144,14 @@ def export_html(session: LoadedSession, output: Path) -> None:
         )
     notes_html = "\n".join(note_parts) if note_parts else "<p><em>No notes.</em></p>"
 
-    # Command details with output
-    raw_io_path = session.session_dir / "logs" / RAW_IO_LOG_NAME
-    outputs = extract_command_outputs(raw_io_path)
+    output_map = build_command_output_map(session)
+
     detail_parts: list[str] = []
-    for i, cmd in enumerate(session.commands):
+    for cmd in session.commands:
         rel = _relative(start_dt, cmd.timestamp_start)
         tag = tag_command(cmd.command)
         badge = _tag_badge(tag)
-        cmd_output = outputs[i] if i < len(outputs) else ""
+        cmd_output = output_map.get((cmd.part, cmd.seq), "")
         output_block = (
             f'<pre class="cmd-output">{html.escape(cmd_output)}</pre>'
             if cmd_output else

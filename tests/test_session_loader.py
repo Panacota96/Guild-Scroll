@@ -7,7 +7,7 @@ from pathlib import Path
 from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
 from guild_scroll.log_schema import SessionMeta, CommandEvent, AssetEvent, NoteEvent
 from guild_scroll.log_writer import JSONLWriter
-from guild_scroll.session_loader import load_session, resolve_session
+from guild_scroll.session_loader import _parse_jsonl, load_session, resolve_session
 from guild_scroll.utils import iso_timestamp
 
 
@@ -103,6 +103,42 @@ class TestLoadSession:
         with pytest.raises(FileNotFoundError):
             load_session("does-not-exist")
 
+    def test_load_warns_and_skips_corrupted_jsonl_line(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        sess_dir = _make_session_dir(sessions_dir, "corrupt-sess")
+        logs_dir = sess_dir / "logs"
+        meta = _write_meta(logs_dir, "corrupt-sess")
+        cmd = CommandEvent(
+            seq=1, command="whoami",
+            timestamp_start="2026-03-31T12:00:05Z",
+            timestamp_end="2026-03-31T12:00:06Z",
+            exit_code=0, working_directory="/home/kali",
+        )
+        with open(logs_dir / SESSION_LOG_NAME, "a", encoding="utf-8") as fh:
+            fh.write("{bad json}\n")
+        with JSONLWriter(logs_dir / SESSION_LOG_NAME) as w:
+            w.write(cmd.to_dict())
+
+        with pytest.warns(UserWarning, match=r"Session 'corrupt-sess': 1 JSONL lines could not be parsed and were skipped"):
+            loaded = load_session("corrupt-sess")
+
+        assert loaded.meta == meta
+        assert len(loaded.commands) == 1
+        assert loaded.commands[0].command == "whoami"
+
+    def test_parse_jsonl_strict_raises_on_corrupted_line(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        sess_dir = _make_session_dir(sessions_dir, "strict-corrupt-sess")
+        logs_dir = sess_dir / "logs"
+        _write_meta(logs_dir, "strict-corrupt-sess")
+        with open(logs_dir / SESSION_LOG_NAME, "a", encoding="utf-8") as fh:
+            fh.write("{bad json}\n")
+
+        with pytest.raises(ValueError, match=r"Invalid JSONL .*session\.jsonl at line 2"):
+            _parse_jsonl(logs_dir / SESSION_LOG_NAME, strict=True)
+
     def test_session_dir_is_set(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()
         sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +170,10 @@ class TestResolveSession:
     def test_unknown_raises(self, isolated_sessions_dir):
         with pytest.raises(FileNotFoundError):
             resolve_session("no-such-session")
+
+    def test_parent_reference_raises(self, isolated_sessions_dir):
+        with pytest.raises(FileNotFoundError):
+            resolve_session("../outside")
 
     def test_none_with_no_env_raises(self, isolated_sessions_dir, monkeypatch):
         monkeypatch.delenv("GUILD_SCROLL_SESSION", raising=False)
