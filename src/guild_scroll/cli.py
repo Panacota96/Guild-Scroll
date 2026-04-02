@@ -1,7 +1,8 @@
 """
 Click CLI: gscroll start | list | status | note | export | replay | search | tui | update
-           join | share | import
+           join | share | import | serve
 """
+import errno
 import sys
 import click
 
@@ -487,6 +488,58 @@ def import_session(archive_path):
         sys.exit(1)
 
     click.echo(f"[gscroll] Imported session '{name}'.")
+
+
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll serve\n"
+        "  gscroll serve htb-machine\n"
+        "  gscroll serve --port 1551 --open\n"
+        "\n"
+        "Starts a localhost-only web app for report creation and tuning.\n"
+        "Default bind: http://127.0.0.1:1551"
+    )
+)
+@click.argument("session_name", required=False, default=None)
+@click.option(
+    "--port", default=1551, type=int, show_default=True,
+    help="Localhost port for the report web app.",
+)
+@click.option(
+    "--open", "open_browser", is_flag=True, default=False,
+    help="Open the browser automatically after server start.",
+)
+def serve(session_name, port, open_browser):
+    """Run a localhost web app for report creation, tuning, and note editing.
+
+    SESSION_NAME is optional. If provided, it is validated before startup.
+    """
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.server import run_server
+
+    if session_name is not None:
+        try:
+            resolve_session(session_name)
+        except FileNotFoundError as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(1)
+
+    try:
+        code = run_server(default_session=session_name, port=port, open_browser_flag=open_browser)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            click.echo(f"Error: Port {port} is already in use.", err=True)
+        else:
+            click.echo(f"Error starting server: {exc}", err=True)
+        sys.exit(1)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if code != 0:
+        sys.exit(code)
 
 
 @cli.command(

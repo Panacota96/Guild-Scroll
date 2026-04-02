@@ -1,0 +1,8 @@
+{
+  "name": "version-check",
+  "description": "Validate required version fields stay synchronized before release-related tool actions.",
+  "event": "PreToolUse",
+  "matcher": "Bash|Run",
+  "command": "bash scripts/check_version_sync.sh",
+  "blockOnFailure": true
+}

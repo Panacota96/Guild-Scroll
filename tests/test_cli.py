@@ -334,3 +334,47 @@ class TestReplayCommand:
         runner = CliRunner()
         result = runner.invoke(cli, ["replay"])
         assert result.exit_code != 0
+
+
+class TestServeCommand:
+    def test_serve_calls_run_server(self, isolated_sessions_dir):
+        runner = CliRunner()
+        with patch("guild_scroll.server.run_server", return_value=0) as mock_run:
+            result = runner.invoke(cli, ["serve", "--port", "1551"])
+        assert result.exit_code == 0
+        mock_run.assert_called_once_with(default_session=None, port=1551, open_browser_flag=False)
+
+    def test_serve_validates_session_if_provided(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir
+
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "serve-sess")
+
+        runner = CliRunner()
+        with patch("guild_scroll.server.run_server", return_value=0) as mock_run:
+            result = runner.invoke(cli, ["serve", "serve-sess"])
+        assert result.exit_code == 0
+        mock_run.assert_called_once_with(default_session="serve-sess", port=1551, open_browser_flag=False)
+
+    def test_serve_missing_session_errors(self, isolated_sessions_dir):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["serve", "no-such-session"])
+        assert result.exit_code != 0
+        assert "Session not found" in result.output
+
+    def test_serve_port_validation_error(self, isolated_sessions_dir):
+        runner = CliRunner()
+        with patch("guild_scroll.server.run_server", side_effect=ValueError("Port must be between 1 and 65535")):
+            result = runner.invoke(cli, ["serve", "--port", "70000"])
+        assert result.exit_code != 0
+        assert "Port must be between 1 and 65535" in result.output
+
+    def test_serve_port_in_use_error_is_friendly(self, isolated_sessions_dir):
+        import errno
+
+        runner = CliRunner()
+        with patch("guild_scroll.server.run_server", side_effect=OSError(errno.EADDRINUSE, "Address already in use")):
+            result = runner.invoke(cli, ["serve", "--port", "1551"])
+        assert result.exit_code != 0
+        assert "Port 1551 is already in use" in result.output

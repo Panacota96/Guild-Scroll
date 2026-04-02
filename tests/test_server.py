@@ -1,0 +1,219 @@
+"""Tests for localhost report server."""
+from __future__ import annotations
+
+import json
+import random
+import string
+import threading
+from http.client import HTTPConnection
+from pathlib import Path
+
+from guild_scroll.log_schema import CommandEvent, SessionMeta
+from guild_scroll.log_writer import JSONLWriter
+from guild_scroll.server import create_server
+from guild_scroll.utils import iso_timestamp
+
+
+def _make_session(sessions_dir, name):
+    logs_dir = sessions_dir / name / "logs"
+    logs_dir.mkdir(parents=True)
+
+    meta = SessionMeta(
+        session_name=name,
+        session_id="abc",
+        start_time=iso_timestamp(),
+        hostname="kali",
+    )
+    cmd = CommandEvent(
+        seq=1,
+        command="nmap -sV 10.10.10.10",
+        timestamp_start=iso_timestamp(),
+        timestamp_end=iso_timestamp(),
+        exit_code=0,
+        working_directory="/home/kali",
+    )
+
+    with JSONLWriter(logs_dir / "session.jsonl") as writer:
+        writer.write(meta.to_dict())
+        writer.write(cmd.to_dict())
+
+
+def _start_test_server(default_session=None):
+    server = create_server(default_session=default_session, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def _request(server, method, path, body=None):
+    conn = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+    headers = {}
+    payload = None
+    if body is not None:
+        payload = json.dumps(body)
+        headers["Content-Type"] = "application/json"
+    conn.request(method, path, body=payload, headers=headers)
+    res = conn.getresponse()
+    data = res.read().decode("utf-8")
+    conn.close()
+    return res.status, data
+
+
+def _request_with_headers(server, method, path, body=None):
+    conn = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+    headers = {}
+    payload = None
+    if body is not None:
+        payload = json.dumps(body)
+        headers["Content-Type"] = "application/json"
+    conn.request(method, path, body=payload, headers=headers)
+    res = conn.getresponse()
+    data = res.read().decode("utf-8")
+    response_headers = dict(res.getheaders())
+    conn.close()
+    return res.status, data, response_headers
+
+
+class TestServerRoutes:
+    def test_api_sessions_lists_created_session(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "web-sess")
+
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "GET", "/api/sessions")
+            assert status == 200
+            payload = json.loads(data)
+            names = [item["session_name"] for item in payload["sessions"]]
+            assert "web-sess" in names
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_session_api_returns_commands(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "api-sess")
+
+        server, thread = _start_test_server(default_session="api-sess")
+        try:
+            status, data = _request(server, "GET", "/api/session/api-sess")
+            assert status == 200
+            payload = json.loads(data)
+            assert payload["meta"]["session_name"] == "api-sess"
+            assert len(payload["commands"]) == 1
+            assert "nmap" in payload["commands"][0]["command"]
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_report_endpoint_returns_preview(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "report-sess")
+
+        server, thread = _start_test_server(default_session="report-sess")
+        try:
+            status, data = _request(
+                server,
+                "POST",
+                "/api/session/report-sess/report",
+                body={"format": "md", "filters": {"tool": "nmap"}},
+            )
+            assert status == 200
+            payload = json.loads(data)
+            assert payload["format"] == "md"
+            assert "Tuned Report" in payload["content"]
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_notes_endpoint_appends_note(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "note-sess")
+
+        server, thread = _start_test_server(default_session="note-sess")
+        try:
+            status, data = _request(
+                server,
+                "POST",
+                "/api/session/note-sess/notes",
+                body={"text": "This is a web note", "tags": ["recon", "web"]},
+            )
+            assert status == 201
+            payload = json.loads(data)
+            assert payload["ok"] is True
+
+            log_file = sessions_dir / "note-sess" / "logs" / "session.jsonl"
+            content = log_file.read_text(encoding="utf-8")
+            assert "This is a web note" in content
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_invalid_session_name_rejected(self, isolated_sessions_dir):
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "GET", "/api/session/../../etc/passwd")
+            assert status == 400
+            payload = json.loads(data)
+            assert "Invalid session name" in payload["error"]
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_security_headers_present_for_json_and_html(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "headers-sess")
+
+        server, thread = _start_test_server(default_session="headers-sess")
+        try:
+            status_json, _, headers_json = _request_with_headers(server, "GET", "/api/sessions")
+            assert status_json == 200
+            assert headers_json.get("X-Content-Type-Options") == "nosniff"
+            assert headers_json.get("X-Frame-Options") == "DENY"
+
+            status_html, _, headers_html = _request_with_headers(server, "GET", "/")
+            assert status_html == 200
+            assert headers_html.get("X-Content-Type-Options") == "nosniff"
+            assert headers_html.get("X-Frame-Options") == "DENY"
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_symlink_session_name_rejected_when_target_outside_sessions(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        outside_dir = isolated_sessions_dir / "outside"
+        outside_dir.mkdir(parents=True, exist_ok=True)
+        link = sessions_dir / "evil-link"
+        link.symlink_to(outside_dir, target_is_directory=True)
+
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "GET", "/api/session/evil-link")
+            assert status == 400
+            payload = json.loads(data)
+            assert "Invalid session name" in payload["error"]
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_fuzz_session_names_do_not_500(self, isolated_sessions_dir):
+        server, thread = _start_test_server()
+        alphabet = string.ascii_letters + string.digits + "._-/%\\~$#@!"
+        try:
+            for _ in range(100):
+                raw = "".join(random.choice(alphabet) for _ in range(18))
+                status, _ = _request(server, "GET", f"/api/session/{raw}")
+                assert status in {400, 404}
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)

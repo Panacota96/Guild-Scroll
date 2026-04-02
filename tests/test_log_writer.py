@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -50,3 +51,24 @@ def test_flush_after_write(tmp_path):
     content = path.read_text()
     assert content.strip()
     w.close()
+
+
+def test_concurrent_writers_same_file_produce_valid_jsonl(tmp_path):
+    path = tmp_path / "concurrent.jsonl"
+
+    def _writer(worker_id: int) -> None:
+        with JSONLWriter(path) as w:
+            for seq in range(100):
+                w.write({"worker": worker_id, "seq": seq})
+
+    threads = [threading.Thread(target=_writer, args=(idx,)) for idx in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 400
+
+    parsed = [json.loads(line) for line in lines]
+    assert all("worker" in record and "seq" in record for record in parsed)

@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose new functionality
+labels: ["type/feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What user need does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: In scope and out of scope
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] Behavior and UX defined
+        - [ ] Tests plan defined
+        - [ ] Security/performance impact reviewed
+        - [ ] Docs update identified
+    validations:
+      required: true

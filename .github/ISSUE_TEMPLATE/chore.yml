@@ -1,0 +1,27 @@
+name: Chore
+description: Maintenance, refactor, tooling, or process updates
+labels: ["type/quality"]
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: Task summary
+    validations:
+      required: true
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why this matters
+    validations:
+      required: true
+  - type: textarea
+    id: checklist
+    attributes:
+      label: Completion checklist
+      value: |
+        - [ ] Scope is clear
+        - [ ] Risks identified
+        - [ ] Validation plan defined
+        - [ ] Follow-up tasks linked
+    validations:
+      required: true

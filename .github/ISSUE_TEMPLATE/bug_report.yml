@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a defect with reproducible steps
+labels: ["type/bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Steps, commands, and sample data
+      placeholder: |
+        1. Run ...
+        2. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checklist for done
+      value: |
+        - [ ] Root cause identified
+        - [ ] Fix implemented
+        - [ ] Tests added or updated
+        - [ ] Docs/changelog updated if needed
+    validations:
+      required: true
