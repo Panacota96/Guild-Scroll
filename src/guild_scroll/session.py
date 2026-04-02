@@ -163,6 +163,7 @@ def finalize_session(
     hook_events_path = logs_dir / HOOK_EVENTS_NAME
     final_log = logs_dir / SESSION_LOG_NAME
     with _get_finalize_lock(final_log):
+        command_count = _read_command_count(final_log)
         events: list[dict] = []
         if hook_events_path.exists():
             for line in hook_events_path.read_text(encoding="utf-8").splitlines():
@@ -185,6 +186,7 @@ def finalize_session(
                     evt["part"] = part
                     cmd_event = CommandEvent.from_dict(evt)
                     writer.write(cmd_event.to_dict())
+                    command_count += 1
                 except (TypeError, KeyError):
                     pass
             elif etype == "asset_hint":
@@ -204,7 +206,7 @@ def finalize_session(
                         writer.write(asset_event.to_dict())
 
         writer.close()
-        _patch_session_meta(final_log, iso_timestamp(), _count_command_records(final_log))
+        _patch_session_meta(final_log, iso_timestamp(), command_count)
 
         # Clean up intermediate hook events
         try:
@@ -222,6 +224,22 @@ def _get_finalize_lock(log_path: Path) -> threading.Lock:
     resolved = log_path.resolve()
     with _FINALIZE_LOCKS_GUARD:
         return _FINALIZE_LOCKS.setdefault(resolved, threading.Lock())
+
+
+def _read_command_count(log_path: Path) -> int:
+    if not log_path.exists():
+        return 0
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+            if record.get("type") == "session_meta":
+                return int(record.get("command_count", 0))
+        except json.JSONDecodeError:
+            continue
+    return _count_command_records(log_path)
 
 
 def _count_command_records(log_path: Path) -> int:

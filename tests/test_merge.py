@@ -185,7 +185,7 @@ class TestMergeParts:
         part_logs = _make_part(sess_dir, 2, [(1, "cmd-b", "2026-04-01T10:02:00Z")])
         with (part_logs / SESSION_LOG_NAME).open("a", encoding="utf-8") as handle:
             handle.write("{not-json}\n")
-            handle.write("")
+            handle.write("\n")
             handle.write('{"type": "command", "seq": 2, "command": "broken"\n')
 
         merged = merge_parts("corrupt-part")
