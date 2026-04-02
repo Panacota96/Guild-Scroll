@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.4.0-green)
+![Version](https://img.shields.io/badge/version-0.5.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -43,6 +43,7 @@ gscroll export --format md   # structured report, ready to share
 | **Annotations** | Timestamped notes and tags, mid-session or post-session |
 | **Export** | Markdown report, self-contained HTML, asciicast v2 (`.cast`) |
 | **Search** | `gscroll search --tool nmap --phase recon --exit-code 0` |
+| **Validation** | `gscroll validate [SESSION] --repair` checks JSONL/assets/parts and patches repairable metadata |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
 | **Session auto-detect** | All sub-commands pick up `GUILD_SCROLL_SESSION` automatically |
@@ -159,6 +160,9 @@ gscroll note "found open port 80 — Apache 2.4" --tag recon
 # Search commands
 gscroll search --phase recon
 gscroll search --tool nmap --exit-code 0
+
+# Validate integrity and repair session metadata
+gscroll validate htb-machine --repair
 
 # Export
 gscroll export --format md

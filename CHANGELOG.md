@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.5.0] — 2026-04-02
+
+### Added
+
+- **Session validation and repair** — `gscroll validate [SESSION] [--repair]` checks JSONL integrity, referenced asset/screenshot paths, and declared multi-part logs; `--repair` patches missing `end_time` and mismatched `command_count` in `session_meta`.
+- **`validator.py`** — `validate_session()` returns a structured `ValidationReport` with diff-style errors, warnings, info, and repair lines.
+- **5 new tests** covering healthy validation, corruption reporting, and metadata repair through both the API and CLI.
+
+---
+
 ## [0.4.0] — 2026-04-01
 
 ### Added
