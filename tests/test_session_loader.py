@@ -171,6 +171,10 @@ class TestResolveSession:
         with pytest.raises(FileNotFoundError):
             resolve_session("no-such-session")
 
+    def test_parent_reference_raises(self, isolated_sessions_dir):
+        with pytest.raises(FileNotFoundError):
+            resolve_session("../outside")
+
     def test_none_with_no_env_raises(self, isolated_sessions_dir, monkeypatch):
         monkeypatch.delenv("GUILD_SCROLL_SESSION", raising=False)
         with pytest.raises(FileNotFoundError):
