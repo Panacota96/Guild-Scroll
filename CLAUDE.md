@@ -38,25 +38,25 @@ Entry point: `pyproject.toml` → `gscroll = "guild_scroll.cli:cli"`
 
 ## Architecture & Conventions
 
-See `.claude/` for details:
-- **Architecture, module map, patterns**: memory at `~/.claude/projects/*/memory/architecture.md`
-- **Python style**: `.claude/rules/python-style.md` (auto-loads when editing `.py` files)
-- **CLI patterns**: `.claude/rules/cli-patterns.md` (auto-loads when editing `cli.py`)
-- **Test conventions**: `.claude/rules/test-conventions.md` (auto-loads when editing tests)
+Shared repo-scoped Copilot guidance now lives in `.github/`:
+- **Workspace guidance**: `.github/copilot-instructions.md`
+- **Python instructions**: `.github/instructions/python-conventions.instructions.md`
+- **CLI instructions**: `.github/instructions/cli-implementation.instructions.md`
+- **Release instructions**: `.github/instructions/release-prep.instructions.md`
 
-Key rules: no external deps beyond `click`, lazy imports in CLI, dataclass `to_dict()`/`from_dict()` with `type`-first serialization, TDD (tests first).
+The original `.claude/` files remain useful as local/personal context. Key rules stay the same: no external deps beyond `click`, lazy imports in CLI, dataclass `to_dict()`/`from_dict()` with `type`-first serialization, TDD (tests first).
 
 ## Git Commit Workflow
 
 **REQUIRED** — before any git commit:
 
 1. Determine version bump (PATCH/MINOR/MAJOR — see semver)
-2. Use `/version-bump` skill or update all 4 locations manually (see `.claude/rules/commit-workflow.md`)
+2. Use the shared release guidance in `.github/skills/release-cycle/SKILL.md` or update all 4 locations manually (see `.github/instructions/release-prep.instructions.md`)
 3. Update CHANGELOG.md
 4. Update README if new commands/features added
 5. Commit
 
-The version-check hook in `.claude/settings.json` will **block commits** with mismatched versions.
+The version-check guidance in `.github/hooks/version-check.json` documents the pre-commit check that blocks mismatched versions.
 
 ## Current Milestone
 

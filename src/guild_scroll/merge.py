@@ -11,6 +11,46 @@ from guild_scroll.config import SESSION_LOG_NAME, PARTS_DIR_NAME
 from guild_scroll.session_loader import load_session, LoadedSession
 
 
+PARTS_BACKUP_DIR_NAME = f"{PARTS_DIR_NAME}.backup"
+
+
+def _write_output_log(log_path: Path, output: str) -> None:
+    log_path.write_text(output, encoding="utf-8")
+
+
+def _validate_merged_log(log_path: Path, expected_command_count: int) -> None:
+    command_count = 0
+    for line_number, line in enumerate(log_path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid merged log line {line_number}: {exc.msg}") from exc
+        if record.get("type") == "command":
+            command_count += 1
+    if command_count != expected_command_count:
+        raise ValueError(
+            f"Merged log command count mismatch: expected {expected_command_count}, got {command_count}."
+        )
+
+
+def restore_parts_backup(session_name: str) -> Path:
+    """Restore parts/ from parts.backup/ for session_name."""
+    session = load_session(session_name)
+    parts_dir = session.session_dir / PARTS_DIR_NAME
+    backup_dir = session.session_dir / PARTS_BACKUP_DIR_NAME
+
+    if not backup_dir.exists():
+        raise FileNotFoundError(f"No backup found for session '{session_name}'.")
+    if parts_dir.exists():
+        raise FileExistsError(f"Session '{session_name}' already has a parts/ directory.")
+
+    backup_dir.rename(parts_dir)
+    return parts_dir
+
+
 def merge_parts(session_name: str) -> LoadedSession:
     """
     Load all parts of a session, merge commands by timestamp, and rewrite
@@ -59,12 +99,29 @@ def merge_parts(session_name: str) -> LoadedSession:
     for note in session.notes:
         output_lines.append(json.dumps(note.to_dict(), ensure_ascii=False))
 
-    final_log.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
-
-    # Remove parts directory — unified data is now in logs/session.jsonl
     parts_dir = sess_dir / PARTS_DIR_NAME
+    backup_dir = sess_dir / PARTS_BACKUP_DIR_NAME
+    if backup_dir.exists():
+        raise FileExistsError(
+            f"Backup directory already exists for session '{session_name}'. Restore it before merging again."
+        )
+
     if parts_dir.exists():
-        shutil.rmtree(str(parts_dir), ignore_errors=True)
+        parts_dir.rename(backup_dir)
+
+    temp_log = final_log.with_suffix(final_log.suffix + ".tmp")
+    try:
+        _write_output_log(temp_log, "\n".join(output_lines) + "\n")
+        _validate_merged_log(temp_log, len(session.commands))
+        temp_log.replace(final_log)
+        _validate_merged_log(final_log, len(session.commands))
+    except Exception:
+        if temp_log.exists():
+            temp_log.unlink(missing_ok=True)
+        raise
+
+    if backup_dir.exists():
+        shutil.rmtree(str(backup_dir), ignore_errors=True)
 
     # Reload and return the merged session
     return load_session(session_name)

@@ -8,9 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ## [0.4.1] — 2026-04-02
 
-### Fixed
+### Added
 
-- **Concurrent session finalization** — `JSONLWriter` now uses a file-level lock while used as a context manager, and `finalize_session()` keeps append + session metadata updates inside the same critical section so concurrent writers cannot corrupt `session.jsonl`.
+- **Shared GitHub Copilot customizations** — scaffolded repository-scoped instructions, agents, skills, hook guidance, and top-level Copilot instructions under `.github/`.
+- **Contributor guidance refresh** — README and CLAUDE now point contributors to the shared `.github/` Copilot assets for TDD, release prep, and issue drafting.
 
 ---
 

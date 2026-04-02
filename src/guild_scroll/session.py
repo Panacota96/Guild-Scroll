@@ -6,6 +6,7 @@ import os
 import shutil
 import socket
 from pathlib import Path
+import threading
 from typing import Optional
 
 from guild_scroll.config import (
@@ -22,6 +23,10 @@ from guild_scroll.log_schema import SessionMeta, CommandEvent, AssetEvent
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.recorder import start_recording
 from guild_scroll.utils import iso_timestamp, sanitize_session_name, generate_session_id
+
+
+_FINALIZE_LOCKS: dict[Path, threading.Lock] = {}
+_FINALIZE_LOCKS_GUARD = threading.Lock()
 
 
 def _session_dir(session_name: str) -> Path:
@@ -155,24 +160,27 @@ def finalize_session(
     """
     hook_events_path = logs_dir / HOOK_EVENTS_NAME
     final_log = logs_dir / SESSION_LOG_NAME
+    with _get_finalize_lock(final_log):
+        command_count = _read_command_count(final_log)
+        events: list[dict] = []
+        if hook_events_path.exists():
+            for line in hook_events_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
 
-    events: list[dict] = []
-    if hook_events_path.exists():
-        for line in hook_events_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+        # Re-open final log in append mode
+        writer = JSONLWriter(final_log)
 
-    command_count = 0
-    with JSONLWriter(final_log) as writer:
         for evt in events:
             etype = evt.get("type")
             if etype == "command":
                 try:
+                    # Inject part number
                     evt["part"] = part
                     cmd_event = CommandEvent.from_dict(evt)
                     writer.write(cmd_event.to_dict())
@@ -195,18 +203,57 @@ def finalize_session(
                         )
                         writer.write(asset_event.to_dict())
 
-        _patch_session_meta_file(writer._fh, iso_timestamp(), command_count)
+        writer.close()
+        _patch_session_meta(final_log, iso_timestamp(), command_count)
 
-    # Clean up intermediate hook events
-    try:
-        hook_events_path.unlink()
-    except FileNotFoundError:
-        pass
+        # Clean up intermediate hook events
+        try:
+            hook_events_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _capture_asset_for_event(source: Path, assets_dir: Path) -> Optional[Path]:
     from guild_scroll.asset_detector import capture_asset
     return capture_asset(source, assets_dir, MAX_ASSET_SIZE_BYTES)
+
+
+def _get_finalize_lock(log_path: Path) -> threading.Lock:
+    resolved = log_path.resolve()
+    with _FINALIZE_LOCKS_GUARD:
+        return _FINALIZE_LOCKS.setdefault(resolved, threading.Lock())
+
+
+def _read_command_count(log_path: Path) -> int:
+    if not log_path.exists():
+        return 0
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+            if record.get("type") == "session_meta":
+                return int(record.get("command_count", 0))
+        except json.JSONDecodeError:
+            continue
+    return _count_command_records(log_path)
+
+
+def _count_command_records(log_path: Path) -> int:
+    if not log_path.exists():
+        return 0
+    count = 0
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            if json.loads(line).get("type") == "command":
+                count += 1
+        except json.JSONDecodeError:
+            continue
+    return count
 
 
 def _patch_session_meta(log_path: Path, end_time: str, command_count: int) -> None:
