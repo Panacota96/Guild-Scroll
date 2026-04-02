@@ -126,6 +126,15 @@ class TestUpdateCommand:
         assert "Current version:" in result.output
 
 
+class TestServeCommand:
+    def test_serve_invokes_web_server(self, isolated_sessions_dir):
+        runner = CliRunner()
+        with patch("guild_scroll.web.app.run_server") as mock_run_server:
+            result = runner.invoke(cli, ["serve", "--port", "1551"])
+        assert result.exit_code == 0
+        mock_run_server.assert_called_once_with(host="127.0.0.1", port=1551)
+
+
 class TestNoteCommand:
     def test_note_added_to_session(self, isolated_sessions_dir):
         from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME

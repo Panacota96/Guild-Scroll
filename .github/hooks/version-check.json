@@ -1,0 +1,6 @@
+{
+  "lifecycleEvent": "PreToolUse",
+  "toolMatcher": "Bash",
+  "command": "bash -lc 'python3 -c \"from pathlib import Path; import re, sys; base = Path(\\\".\\\"); files = {\\\"init\\\": base / \\\"src/guild_scroll/__init__.py\\\", \\\"pyproject\\\": base / \\\"pyproject.toml\\\", \\\"readme\\\": base / \\\"README.md\\\", \\\"test\\\": base / \\\"tests/test_cli.py\\\"}; versions = {\\\"init\\\": re.search(r\\\"__version__\\\\s*=\\\\s*\\\\\\\"([^\\\\\\\"]+)\\\\\\\"\\\", files[\\\"init\\\"].read_text()).group(1), \\\"pyproject\\\": re.search(r\\\"^version\\\\s*=\\\\s*\\\\\\\"([^\\\\\\\"]+)\\\\\\\"\\\", files[\\\"pyproject\\\"].read_text(), re.MULTILINE).group(1), \\\"readme\\\": re.search(r\\\"version-([0-9]+\\\\.[0-9]+\\\\.[0-9]+)\\\", files[\\\"readme\\\"].read_text()).group(1), \\\"test\\\": re.search(r\\\"([0-9]+\\\\.[0-9]+\\\\.[0-9]+)\\\", files[\\\"test\\\"].read_text()).group(1)}; sys.exit(0 if len(set(versions.values())) == 1 else 2)\"'",
+  "description": "Run this before a git commit to block the commit when version strings are out of sync across src/guild_scroll/__init__.py, pyproject.toml, the README.md version badge, and tests/test_cli.py."
+}

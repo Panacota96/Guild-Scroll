@@ -41,10 +41,11 @@ gscroll export --format md   # structured report, ready to share
 | **Tool tagging** | 40+ security tools auto-classified as `recon` / `exploit` / `post-exploit` |
 | **MITRE ATT&CK** | Each tool mapped to a MITRE technique ID |
 | **Annotations** | Timestamped notes and tags, mid-session or post-session |
-| **Export** | Markdown report, self-contained HTML, asciicast v2 (`.cast`) |
+| **Export** | Markdown report, self-contained HTML, live web previews/downloads, asciicast v2 (`.cast`) |
 | **Search** | `gscroll search --tool nmap --phase recon --exit-code 0` |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
+| **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API |
 | **Session auto-detect** | All sub-commands pick up `GUILD_SCROLL_SESSION` automatically |
 | **Self-update** | `gscroll update` checks GitHub and reinstalls |
 
@@ -172,6 +173,9 @@ gscroll replay --speed 2.0
 # Interactive TUI dashboard
 gscroll tui htb-machine
 
+# Local web preview
+gscroll serve
+
 # List all sessions
 gscroll list
 
@@ -292,6 +296,13 @@ Contributions, bug reports, and feature requests are welcome.
 - No external dependencies beyond `click` in core code
 - Follow the existing dataclass patterns (`to_dict()` / `from_dict()` with `type`-first serialization)
 - Keep CLI lazy imports (all imports inside command function bodies)
+
+**Shared Copilot customizations:**
+- Workspace guidance: `.github/copilot-instructions.md`
+- Auto-loaded instructions: `.github/instructions/`
+- Shared agents: `.github/agents/tdd-enforcer.agent.md`, `.github/agents/release-manager.agent.md`, `.github/agents/docs-maintainer.agent.md`
+- Shared skills: `.github/skills/issue-from-template/SKILL.md` (`/issue`) and `.github/skills/release-cycle/SKILL.md` (`/release`)
+- Version-check hook: `.github/hooks/version-check.json` documents the pre-commit version sync check
 
 Found a bug or have an idea? [Open an issue](https://github.com/Panacota96/Guild-Scroll/issues).
 
