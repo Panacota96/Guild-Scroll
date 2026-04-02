@@ -38,7 +38,7 @@ RUN apt-get update && apt-get upgrade -y && \
 WORKDIR /app
 COPY . .
 RUN python3 -m pip install --upgrade pip setuptools wheel && \
-    python3 -m pip install -e .
+    python3 -m pip install .
 
 # Create work directory for session recording
 WORKDIR /work

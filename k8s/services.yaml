@@ -27,10 +27,6 @@ metadata:
     component: recorder
 spec:
   clusterIP: None
-  ports:
-  - name: ssh
-    port: 22
-    protocol: TCP
   selector:
     app: guild-scroll
     component: recorder

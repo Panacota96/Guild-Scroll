@@ -55,7 +55,7 @@ def check_links(root: Path) -> list[str]:
 
 
 def main() -> int:
-    root = Path.cwd()
+    root = Path(__file__).resolve().parents[1]
     errors = check_links(root)
     if errors:
         print("Markdown link check failed:\n")

@@ -49,12 +49,8 @@ spec:
           runAsNonRoot: false
           allowPrivilegeEscalation: true
           readOnlyRootFilesystem: false
+      volumes:
+      - name: guild-scroll-sessions
+        persistentVolumeClaim:
+          claimName: guild-scroll-sessions-pvc
       restartPolicy: Always
-  volumeClaimTemplates:
-  - metadata:
-      name: guild-scroll-sessions
-    spec:
-      accessModes: ["ReadWriteOnce"]
-      resources:
-        requests:
-          storage: 20Gi

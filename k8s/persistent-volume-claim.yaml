@@ -13,19 +13,3 @@ spec:
     requests:
       storage: 10Gi
   storageClassName: standard
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: guild-scroll-sessions-pvc-recorder
-  namespace: guild-scroll
-  labels:
-    app: guild-scroll
-    component: recorder-storage
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 20Gi
-  storageClassName: standard

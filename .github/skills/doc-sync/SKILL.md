@@ -116,7 +116,7 @@ File naming convention:
 ### Step 4 — Cross-link
 
 Every new doc page must be linked from at least one existing document. Add the link to:
-- The relevant section of `README.md` (e.g., "See [Deployment Modes](docs/docker/deployment-modes.md)")
+- The relevant section of `README.md` (e.g., "See [Deployment Modes](../../../docs/docker/deployment-modes.md)")
 - `DOCKER.md` if Docker/K8s related
 - A parent `docs/` page if it belongs to an existing topic tree
 

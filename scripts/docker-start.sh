@@ -47,12 +47,17 @@ check_requirements() {
     fi
     print_success "Docker is installed ($(docker --version))"
     
-    if ! command -v docker-compose &> /dev/null; then
+    # Support both "docker compose" (v2 plugin) and legacy "docker-compose" binary
+    if docker compose version &> /dev/null; then
+        DOCKER_COMPOSE="docker compose"
+    elif command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE="docker-compose"
+    else
         print_error "Docker Compose is not installed. Please install Docker Compose."
         echo "  Visit: https://docs.docker.com/compose/install/"
         exit 1
     fi
-    print_success "Docker Compose is installed ($(docker-compose --version))"
+    print_success "Docker Compose is available (${DOCKER_COMPOSE})"
     
     # Check Docker daemon
     if ! docker ps &> /dev/null; then
@@ -82,13 +87,13 @@ start_containers() {
     print_info "Building and starting containers..."
     cd "${PROJECT_ROOT}"
     
-    if docker-compose up -d; then
+    if $DOCKER_COMPOSE up -d; then
         print_success "Containers started successfully!"
         echo ""
         echo "Next steps:"
         print_info "Open web UI: http://localhost:8080"
-        print_info "Kali shell: docker-compose exec kali-recorder zsh"
-        print_info "View logs: docker-compose logs -f"
+        print_info "Kali shell: $DOCKER_COMPOSE exec kali-recorder zsh"
+        print_info "View logs: $DOCKER_COMPOSE logs -f"
     else
         print_error "Failed to start containers"
         exit 1
@@ -99,7 +104,7 @@ stop_containers() {
     print_info "Stopping containers..."
     cd "${PROJECT_ROOT}"
     
-    if docker-compose down; then
+    if $DOCKER_COMPOSE down; then
         print_success "Containers stopped"
     else
         print_error "Failed to stop containers"
@@ -115,12 +120,12 @@ kali_shell() {
     cd "${PROJECT_ROOT}"
     
     # Check if container is running
-    if ! docker-compose ps kali-recorder | grep -q "Up"; then
+    if ! $DOCKER_COMPOSE ps kali-recorder | grep -q "Up"; then
         print_error "Kali container is not running. Start it first with option 1."
         return 1
     fi
     
-    docker-compose exec kali-recorder zsh
+    $DOCKER_COMPOSE exec kali-recorder zsh
 }
 
 web_ui() {
@@ -128,7 +133,7 @@ web_ui() {
     print_info "URL: http://localhost:8080"
     
     # Check if container is running
-    if ! docker-compose ps guild-scroll-app | grep -q "Up"; then
+    if ! $DOCKER_COMPOSE ps guild-scroll-app | grep -q "Up"; then
         print_error "Guild Scroll app is not running. Start it first with option 1."
         return 1
     fi
@@ -148,14 +153,14 @@ view_logs() {
     print_info "Showing container logs (Ctrl+C to exit)..."
     echo ""
     cd "${PROJECT_ROOT}"
-    docker-compose logs -f
+    $DOCKER_COMPOSE logs -f
 }
 
 rebuild_images() {
     print_warning "Rebuilding images from scratch (no cache)..."
     cd "${PROJECT_ROOT}"
     
-    if docker-compose build --no-cache; then
+    if $DOCKER_COMPOSE build --no-cache; then
         print_success "Images rebuilt successfully"
     else
         print_error "Failed to rebuild images"
@@ -171,7 +176,7 @@ cleanup() {
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         print_info "Cleaning up..."
         cd "${PROJECT_ROOT}"
-        docker-compose down -v
+        $DOCKER_COMPOSE down -v
         print_success "Cleanup complete"
     else
         print_info "Cleanup cancelled"

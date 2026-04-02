@@ -74,7 +74,7 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}
           tags: |
             type=ref,event=branch
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=sha-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
@@ -116,9 +116,9 @@ jobs:
 
     steps:
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.ref_name == github.event.repository.default_branch && 'latest' || format('sha-{0}', github.sha) }}
           format: 'sarif'
           output: 'trivy-${{ matrix.image }}.sarif'
 
@@ -145,7 +145,7 @@ jobs:
           docker buildx build -t guild-scroll-kali:test -f docker/Dockerfile.kali --load .
 
       - name: Start containers with Docker Compose
-        run: docker-compose up -d --timeout 30
+        run: docker compose up -d --timeout 30
         env:
           COMPOSE_FILE: docker-compose.yml
 
@@ -153,7 +153,7 @@ jobs:
         run: |
           echo "Waiting for Guild Scroll app to be healthy..."
           for i in {1..30}; do
-            if docker-compose exec -T guild-scroll-app curl -f http://localhost:8080/api/sessions; then
+            if docker compose exec -T guild-scroll-app curl -f http://localhost:8080/api/sessions; then
               echo "Guild Scroll app is healthy!"
               exit 0
             fi
@@ -161,22 +161,22 @@ jobs:
             sleep 2
           done
           echo "Guild Scroll app did not become healthy"
-          docker-compose logs
+          docker compose logs
           exit 1
 
       - name: Test Kali container
         run: |
           echo "Testing Kali container..."
-          docker-compose exec -T kali-recorder echo "✓ Kali container is responsive"
-          docker-compose exec -T kali-recorder gscroll list
+          docker compose exec -T kali-recorder echo "✓ Kali container is responsive"
+          docker compose exec -T kali-recorder gscroll list
 
       - name: Verify session volume
         run: |
-          docker-compose exec -T guild-scroll-app ls -la /work/guild_scroll/sessions/ || true
+          docker compose exec -T guild-scroll-app ls -la /work/guild_scroll/sessions/ || true
 
       - name: Clean up
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
 
   k8s-validate:
     name: Validate Kubernetes Manifests
@@ -196,7 +196,7 @@ jobs:
         run: |
           for file in k8s/*.yaml; do
             echo "Validating $file..."
-            kubeval "$file" || true
+            kubeval "$file"
           done
 
       - name: Validate kustomization
