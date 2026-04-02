@@ -83,9 +83,8 @@ def start_session(raw_name: str, join: bool = False) -> None:
         platform=platform,
     )
     final_log = logs_dir / SESSION_LOG_NAME
-    writer = JSONLWriter(final_log)
-    writer.write(meta.to_dict())
-    writer.close()
+    with JSONLWriter(final_log) as writer:
+        writer.write(meta.to_dict())
 
     try:
         start_recording(raw_io_path, timing_path, hook_dir, hook_events_path, session_name=name, shell=shell)
@@ -123,9 +122,8 @@ def _start_part(session_name: str, sess_dir: Path) -> None:
         hostname=socket.gethostname(),
     )
     part_log = part_logs_dir / SESSION_LOG_NAME
-    writer = JSONLWriter(part_log)
-    writer.write(part_meta.to_dict())
-    writer.close()
+    with JSONLWriter(part_log) as writer:
+        writer.write(part_meta.to_dict())
 
     env_part = str(next_part)
     try:
@@ -262,7 +260,15 @@ def _patch_session_meta(log_path: Path, end_time: str, command_count: int) -> No
     """Read session.jsonl, update the session_meta record, rewrite."""
     if not log_path.exists():
         return
-    lines = log_path.read_text(encoding="utf-8").splitlines()
+    with JSONLWriter(log_path) as writer:
+        _patch_session_meta_file(writer._fh, end_time, command_count)
+
+
+def _patch_session_meta_file(fh, end_time: str, command_count: int) -> None:
+    """Patch session_meta in-place using an already-open a+ compatible handle."""
+    fh.flush()
+    fh.seek(0)
+    lines = fh.read().splitlines()
     updated = []
     for line in lines:
         line = line.strip()
@@ -277,7 +283,10 @@ def _patch_session_meta(log_path: Path, end_time: str, command_count: int) -> No
             record["end_time"] = end_time
             record["command_count"] = command_count
         updated.append(json.dumps(record, ensure_ascii=False))
-    log_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    fh.seek(0)
+    fh.truncate()
+    fh.write("\n".join(updated) + "\n")
+    fh.flush()
 
 
 def list_sessions() -> list[dict]:
