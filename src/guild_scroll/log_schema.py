@@ -21,6 +21,8 @@ class SessionMeta:
     parts_count: int = 1
     platform: Optional[str] = None  # "htb" | "thm" | None
     operator: Optional[str] = None
+    result: Optional[str] = None  # "rooted" | "compromised" | "partial" | "failed" | "incomplete"
+    finalized: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

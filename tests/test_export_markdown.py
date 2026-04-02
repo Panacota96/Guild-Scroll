@@ -162,3 +162,37 @@ class TestExportMarkdown:
         export_markdown(session, out)
         content = out.read_text()
         assert "**Operator:** david" in content
+
+    def test_result_shown_when_set(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.result = "rooted"
+        out = tmp_path / "report.md"
+        export_markdown(session, out)
+        content = out.read_text()
+        assert "**Result:** rooted" in content
+
+    def test_finalized_shown_when_true(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.finalized = True
+        out = tmp_path / "report.md"
+        export_markdown(session, out)
+        content = out.read_text()
+        assert "**Finalized:** yes" in content
+
+    def test_result_and_finalized_absent_by_default(self, tmp_path):
+        session = _make_session(tmp_path)
+        out = tmp_path / "report.md"
+        export_markdown(session, out)
+        content = out.read_text()
+        assert "Result:" not in content
+        assert "Finalized:" not in content
+
+    def test_writeup_scope_includes_result_and_finalized(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.result = "compromised"
+        session.meta.finalized = True
+        out = tmp_path / "writeup.md"
+        export_markdown(session, out, writeup=True)
+        content = out.read_text()
+        assert "- Result: compromised" in content
+        assert "- Finalized: yes" in content

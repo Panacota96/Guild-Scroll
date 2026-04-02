@@ -643,6 +643,79 @@ def serve(host, port):
         server.server_close()
 
 
+_VALID_RESULTS = ("rooted", "compromised", "partial", "failed", "incomplete")
+
+
+@cli.command(
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll finalize htb-machine --result rooted\n"
+        "  gscroll finalize htb-machine --result compromised\n"
+        "\n"
+        "  # Inside a recording session (session auto-detected):\n"
+        "  gscroll finalize --result partial\n"
+        "\n"
+        f"Valid result values: {', '.join(_VALID_RESULTS)}\n"
+    )
+)
+@click.argument("session_name", required=False, default=None)
+@click.option(
+    "--result",
+    "result",
+    default=None,
+    type=click.Choice(list(_VALID_RESULTS), case_sensitive=False),
+    help="Session result: rooted, compromised, partial, failed, or incomplete.",
+)
+def finalize(session_name, result):
+    """Mark a session as finalized (ready for reporting).
+
+    SESSION_NAME is optional when inside a recording session.
+    Use --result to record the engagement outcome.
+    Once finalized, the session metadata is updated in-place.
+    """
+    import json
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.config import SESSION_LOG_NAME
+
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    log_path = sess_dir / "logs" / SESSION_LOG_NAME
+    if not log_path.exists():
+        click.echo(f"Error: Session log not found for '{sess_dir.name}'.", err=True)
+        sys.exit(1)
+
+    rewritten: list[str] = []
+    found_meta = False
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            record = json.loads(stripped)
+        except json.JSONDecodeError:
+            rewritten.append(stripped)
+            continue
+        if record.get("type") == "session_meta":
+            record["finalized"] = True
+            if result is not None:
+                record["result"] = result
+            found_meta = True
+        rewritten.append(json.dumps(record, ensure_ascii=False))
+
+    if not found_meta:
+        click.echo(f"Error: No session_meta record found in '{sess_dir.name}'.", err=True)
+        sys.exit(1)
+
+    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    result_str = f" (result: {result})" if result else ""
+    click.echo(f"[gscroll] Session '{sess_dir.name}' finalized{result_str}.")
+
+
 @cli.command(
     epilog="\b\nExample:\n  gscroll update\n",
 )

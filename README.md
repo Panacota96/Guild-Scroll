@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.6.0-green)
+![Version](https://img.shields.io/badge/version-0.7.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -189,6 +189,10 @@ gscroll serve
 # List all sessions
 gscroll list
 
+# Finalize a session and record the outcome
+gscroll finalize htb-machine --result rooted
+gscroll finalize htb-machine --result compromised
+
 # Update to latest
 gscroll update
 ```
@@ -229,6 +233,27 @@ Both formats include:
 | **Findings** | Full command table with phase tags |
 | **Remediation** | Short-, medium-, and long-term priorities |
 | **Appendix** | Notes and captured command output evidence |
+
+---
+
+## Finalize Workflow
+
+Mark a session as complete and record its outcome for reporting:
+
+```bash
+# Record the engagement result (rooted, compromised, partial, failed, or incomplete)
+gscroll finalize htb-machine --result rooted
+
+# Finalize without a result (marks as complete but leaves result unset)
+gscroll finalize htb-machine
+
+# Auto-detected inside a recording session
+gscroll finalize --result partial
+```
+
+Once finalized, the `finalized: true` and `result` fields are persisted in the session JSONL log and surfaced in all export formats (Markdown header, HTML meta, and writeup scope table).
+
+Valid result values: `rooted`, `compromised`, `partial`, `failed`, `incomplete`.
 
 
 
