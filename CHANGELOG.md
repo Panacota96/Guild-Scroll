@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.1] — 2026-04-02
+
+### Added
+
+- **`gscroll restore`** — restores `parts/` from `parts.backup/` after a failed multi-part merge.
+
+### Fixed
+
+- **Safer multi-part merges** — `merge_parts()` now renames `parts/` to `parts.backup/`, validates every merged JSONL line plus the total command count before cleanup, and preserves the backup when the merged log write fails.
+
+---
+
 ## [0.4.0] — 2026-04-01
 
 ### Added

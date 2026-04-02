@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from guild_scroll.cli import cli
 from guild_scroll.log_schema import SessionMeta, CommandEvent
 from guild_scroll.log_writer import JSONLWriter
+from guild_scroll.merge import PARTS_BACKUP_DIR_NAME
 from guild_scroll.utils import iso_timestamp
 
 
@@ -80,7 +81,7 @@ class TestVersionFlag:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.4.0" in result.output
+        assert "0.4.1" in result.output
 
 
 class TestUpdateCommand:
@@ -334,3 +335,23 @@ class TestReplayCommand:
         runner = CliRunner()
         result = runner.invoke(cli, ["replay"])
         assert result.exit_code != 0
+
+
+class TestRestoreCommand:
+    def test_restore_moves_backup_back_to_parts(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir
+
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "restore-sess")
+        backup_part_logs = sessions_dir / "restore-sess" / PARTS_BACKUP_DIR_NAME / "2" / "logs"
+        backup_part_logs.mkdir(parents=True)
+        (backup_part_logs / "session.jsonl").write_text("", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["restore", "restore-sess"])
+
+        assert result.exit_code == 0
+        assert "Restored parts backup" in result.output
+        assert (sessions_dir / "restore-sess" / "parts" / "2" / "logs").exists()
+        assert not (sessions_dir / "restore-sess" / PARTS_BACKUP_DIR_NAME).exists()

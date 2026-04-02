@@ -6,7 +6,7 @@ import pytest
 from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME, PARTS_DIR_NAME
 from guild_scroll.log_schema import SessionMeta, CommandEvent
 from guild_scroll.log_writer import JSONLWriter
-from guild_scroll.merge import merge_parts
+from guild_scroll.merge import merge_parts, PARTS_BACKUP_DIR_NAME
 
 
 def _make_session(sessions_dir: Path, name: str) -> Path:
@@ -102,5 +102,30 @@ class TestMergeParts:
 
         log_file = sess_dir / "logs" / SESSION_LOG_NAME
         records = [json.loads(l) for l in log_file.read_text().splitlines() if l.strip()]
+        meta = next(r for r in records if r["type"] == "session_meta")
         commands = [r for r in records if r["type"] == "command"]
+        assert meta["command_count"] == 2
         assert len(commands) == 2
+        assert not (sess_dir / PARTS_DIR_NAME).exists()
+        assert not (sess_dir / PARTS_BACKUP_DIR_NAME).exists()
+
+    def test_merge_write_failure_keeps_parts_backup(self, isolated_sessions_dir, monkeypatch):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        sess_dir = _make_session(sessions_dir, "write-failure")
+        _add_command_to(sess_dir / "logs", 1, "cmd-a", "2026-04-01T10:01:00Z", part=1)
+        _make_part(sess_dir, 2, [(1, "cmd-b", "2026-04-01T10:02:00Z")])
+
+        def fail_mid_write(log_path: Path, output: str) -> None:
+            log_path.write_text(output[: len(output) // 2], encoding="utf-8")
+            raise OSError("disk full")
+
+        monkeypatch.setattr("guild_scroll.merge._write_output_log", fail_mid_write)
+
+        with pytest.raises(OSError, match="disk full"):
+            merge_parts("write-failure")
+
+        assert not (sess_dir / PARTS_DIR_NAME).exists()
+        backup_dir = sess_dir / PARTS_BACKUP_DIR_NAME
+        assert backup_dir.exists()
+        assert (backup_dir / "2" / "logs" / SESSION_LOG_NAME).exists()

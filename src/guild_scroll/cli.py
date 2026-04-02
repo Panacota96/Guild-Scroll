@@ -1,6 +1,6 @@
 """
 Click CLI: gscroll start | list | status | note | export | replay | search | tui | update
-           join | share | import
+           join | restore | share | import
 """
 import sys
 import click
@@ -424,11 +424,48 @@ def join(session_name):
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
-    merged = merge_parts(sess_dir.name)
+    try:
+        merged = merge_parts(sess_dir.name)
+    except (FileExistsError, OSError, ValueError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
     click.echo(
-        f"[gscroll] Merged {len(merged.parts)} parts into '{sess_dir.name}' "
+        f"[gscroll] Merged {merged.meta.parts_count} parts into '{sess_dir.name}' "
         f"({len(merged.commands)} commands total)."
     )
+
+
+@cli.command(
+    name="restore",
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  gscroll restore htb-machine\n"
+        "  gscroll restore              # auto-detects session from GUILD_SCROLL_SESSION\n"
+        "\n"
+        "Restores parts/ from parts.backup/ after a failed merge."
+    )
+)
+@click.argument("session_name", required=False, default=None)
+def restore(session_name):
+    """Restore a session's parts/ directory from parts.backup/."""
+    from guild_scroll.session_loader import resolve_session
+    from guild_scroll.merge import restore_parts_backup
+
+    try:
+        sess_dir = resolve_session(session_name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    try:
+        restore_parts_backup(sess_dir.name)
+    except (FileNotFoundError, FileExistsError, OSError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"[gscroll] Restored parts backup for '{sess_dir.name}'.")
 
 
 @cli.command(
