@@ -10,11 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ### Added
 
-- **Cyberpunk + medieval fantasy homepage redesign** — `GET /` now renders a fully themed card-based layout with a hero band, CSS variables (`--bg-void`, `--rune-amber`, `--hover-core`), `auto-fit` grid, hover-glow via CSS transitions, and a `@keyframes rise` fade-in animation ≤420 ms (`web/app.py`).
-- **Empty state panel** — When no sessions exist the grid displays an `empty-state` article card with a prompt to start a new recording.
-- **Responsive layout** — `@media (max-width: 700px)` collapses the card grid to a single column and scales hero text for ≥360 px viewports.
-- **Page `<title>` updated** — Browser tab and bookmark label now reads `Guild Scroll Session Codex`.
-- **4 new acceptance tests in `TestIndexPage`** — coverage for CSS variable presence, grid auto-fit declaration, empty-state rendering, and responsive media query (`tests/test_web.py`).
+- **Operator metadata in SessionMeta** — `SessionMeta` now includes an `operator: Optional[str]` field auto-populated from the `USER`, `LOGNAME`, or `USERNAME` environment variable at session start (`log_schema.py`, `session.py`).
+- **Operator propagated to exports** — Markdown, HTML, and Obsidian exporters render the operator identity when present; the field also travels with session archives (`exporters/markdown.py`, `exporters/html.py`, `exporters/obsidian.py`).
+- **Operator tests** — tests cover metadata roundtrip, detection priority, and rendering in all three export formats (`tests/test_log_schema.py`, `tests/test_session.py`, `tests/test_export_markdown.py`, `tests/test_export_html.py`, `tests/test_export_obsidian.py`).
+- **README operator metadata note** — JSONL event table and a callout block document the operator field and its auto-detection source.
 
 ---
 
