@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.6.0-green)
+![Version](https://img.shields.io/badge/version-0.7.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -302,6 +302,38 @@ Override the base path with `GUILD_SCROLL_DIR`.
 | `command` | `seq`, `command`, `timestamp_start`, `timestamp_end`, `exit_code`, `working_directory` |
 | `asset` | `seq`, `trigger_command`, `asset_type`, `captured_path`, `original_path`, `timestamp` |
 | `note` | `text`, `timestamp`, `tags` |
+
+---
+
+## Session Integrity (HMAC-SHA256)
+
+Guild Scroll provides cryptographic tamper-evidence for event logs using HMAC-SHA256 (stdlib only).
+
+### How it works
+
+When `gscroll start` creates a new session it generates a 32-byte random key stored at `{session_dir}/session.key` (permissions 0o600, readable only by the owning user). Every subsequent event written to the JSONL log — `command`, `note`, `asset`, `screenshot` — includes an `event_hmac` field: the HMAC-SHA256 hex digest of the event payload (all fields except `event_hmac` itself, serialised with sorted keys).
+
+```jsonl
+{"type": "command", "seq": 1, "command": "id", ..., "event_hmac": "3a7f..."}
+```
+
+`session_meta` records are excluded from HMAC signing because their fields (e.g. `command_count`, `end_time`) are updated in-place by `gscroll validate --repair`.
+
+### Verifying integrity
+
+```bash
+gscroll validate htb-machine
+```
+
+The validator loads `session.key`, recomputes the expected digest for every signed event, and reports any mismatch as an **error**:
+
+```
+- error: HMAC mismatch for command event (seq=3): record may have been tampered with
+```
+
+### Backward compatibility
+
+Sessions created before 0.7.0 do not have a `session.key` file and will validate cleanly — HMAC checks are skipped when the key file is absent. If events carry an `event_hmac` field but the key file is missing, the validator emits a **warning** rather than an error.
 
 ---
 

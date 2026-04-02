@@ -16,6 +16,7 @@ from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 from guild_scroll.config import SESSION_LOG_NAME, get_sessions_dir
+from guild_scroll.integrity import load_session_key
 from guild_scroll.log_schema import NoteEvent
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.search import SearchFilter, search_commands
@@ -381,7 +382,8 @@ loadCommands();
 
         log_file = session_dir / "logs" / SESSION_LOG_NAME
         event = NoteEvent(text=text, timestamp=iso_timestamp(), tags=tags)
-        with JSONLWriter(log_file) as writer:
+        hmac_key = load_session_key(session_dir)
+        with JSONLWriter(log_file, hmac_key=hmac_key) as writer:
             writer.write(event.to_dict())
 
         self._write_json({"ok": True, "message": "Note saved", "tags": tags}, status=HTTPStatus.CREATED)

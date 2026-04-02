@@ -5,7 +5,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 try:
     import fcntl
@@ -19,8 +19,9 @@ except ImportError:
 
 
 class JSONLWriter:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, hmac_key: Optional[bytes] = None):
         self._path = path
+        self._hmac_key = hmac_key
         self._lock = threading.Lock()
         self._file_lock_held = False
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,6 +54,12 @@ class JSONLWriter:
         fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
 
     def write(self, record: dict[str, Any]) -> None:
+        if self._hmac_key is not None:
+            from guild_scroll.integrity import compute_event_hmac, should_sign
+
+            if should_sign(record):
+                record = dict(record)
+                record["event_hmac"] = compute_event_hmac(self._hmac_key, record)
         line = json.dumps(record, ensure_ascii=False)
         with self._lock:
             self._lock_file()

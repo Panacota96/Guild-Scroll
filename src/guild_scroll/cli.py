@@ -177,6 +177,7 @@ def note(text, session_name, tags):
     from guild_scroll.session_loader import resolve_session
     from guild_scroll.log_schema import NoteEvent
     from guild_scroll.log_writer import JSONLWriter
+    from guild_scroll.integrity import load_session_key
     from guild_scroll.utils import iso_timestamp
     from guild_scroll.config import SESSION_LOG_NAME
 
@@ -192,7 +193,8 @@ def note(text, session_name, tags):
         timestamp=iso_timestamp(),
         tags=list(tags),
     )
-    with JSONLWriter(log_file) as writer:
+    hmac_key = load_session_key(sess_dir)
+    with JSONLWriter(log_file, hmac_key=hmac_key) as writer:
         writer.write(event.to_dict())
     click.echo(f"[gscroll] Note added to session '{sess_dir.name}'.")
 

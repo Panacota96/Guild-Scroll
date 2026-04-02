@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from guild_scroll.config import PARTS_DIR_NAME, SESSION_LOG_NAME
+from guild_scroll.integrity import load_session_key, verify_event_hmac, should_sign
 
 
 @dataclass
@@ -163,6 +164,27 @@ def validate_session(sess_dir: Path) -> ValidationReport:
         )
     if meta is not None and not meta.get("end_time"):
         report.warnings.append("session_meta.end_time is missing")
+
+    # HMAC integrity check
+    hmac_key = load_session_key(sess_dir)
+    if hmac_key is not None:
+        for record in records:
+            if not should_sign(record):
+                continue
+            if not verify_event_hmac(hmac_key, record):
+                event_type = record.get("type", "unknown")
+                seq = record.get("seq", "?")
+                report.errors.append(
+                    f"HMAC mismatch for {event_type} event (seq={seq}): record may have been tampered with"
+                )
+    else:
+        signed_count = sum(
+            1 for r in records if should_sign(r) and r.get("event_hmac") is not None
+        )
+        if signed_count:
+            report.warnings.append(
+                f"{signed_count} event(s) carry event_hmac but session.key is missing — cannot verify integrity"
+            )
 
     referenced_paths: set[Path] = set()
     for record in records:
