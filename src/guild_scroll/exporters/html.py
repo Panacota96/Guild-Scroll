@@ -135,7 +135,7 @@ _HTML_TEMPLATE = Template("""\
     $operator_html
   <strong>Date:</strong> $start_time &nbsp;|&nbsp;
   <strong>Duration:</strong> $duration &nbsp;|&nbsp;
-  <strong>Commands:</strong> $cmd_count
+  <strong>Commands:</strong> $cmd_count$result_finalized_html
 </p>
 
 <h2>Timeline</h2>
@@ -254,6 +254,10 @@ def _build_writeup_html(
     parts.append(f'<tr><td>Start</td><td>{h(meta.start_time)}</td></tr>')
     parts.append(f'<tr><td>Duration</td><td>{h(duration)}</td></tr>')
     parts.append(f'<tr><td>Commands Executed</td><td>{len(session.commands)}</td></tr>')
+    if getattr(meta, "result", None):
+        parts.append(f'<tr><td>Result</td><td>{h(meta.result)}</td></tr>')
+    if getattr(meta, "finalized", False):
+        parts.append('<tr><td>Finalized</td><td>yes</td></tr>')
     parts.append('</table>')
 
     parts.append('<h3>Assessment Overview and Recommendations</h3>')
@@ -501,6 +505,14 @@ def export_html(session: LoadedSession, output: Path, writeup: bool = False) -> 
         start_time=html.escape(meta.start_time),
         duration=html.escape(duration),
         cmd_count=len(session.commands),
+        result_finalized_html=(
+            "".join([
+                f" &nbsp;|&nbsp; <strong>Result:</strong> {html.escape(meta.result)}"
+                if getattr(meta, "result", None) else "",
+                " &nbsp;|&nbsp; <strong>Finalized:</strong> yes"
+                if getattr(meta, "finalized", False) else "",
+            ])
+        ),
         timeline_rows="\n".join(row_parts),
         cmd_details_html=cmd_details_html,
         note_count=len(session.notes),

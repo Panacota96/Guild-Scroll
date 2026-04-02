@@ -188,3 +188,42 @@ class TestExportHtmlWriteup:
         content = out.read_text()
         assert "Penetration Test Report" in content
 
+    def test_default_result_shown_when_set(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.result = "rooted"
+        out = tmp_path / "report.html"
+        export_html(session, out)
+        content = out.read_text()
+        assert "Result" in content
+        assert "rooted" in content
+
+    def test_default_finalized_shown_when_true(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.finalized = True
+        out = tmp_path / "report.html"
+        export_html(session, out)
+        content = out.read_text()
+        assert "Finalized" in content
+        assert "yes" in content
+
+    def test_default_result_absent_by_default(self, tmp_path):
+        session = _make_session(tmp_path)
+        out = tmp_path / "report.html"
+        export_html(session, out)
+        content = out.read_text()
+        assert "Result" not in content
+        assert "Finalized" not in content
+
+    def test_writeup_scope_includes_result_and_finalized(self, tmp_path):
+        session = _make_session(tmp_path)
+        session.meta.result = "compromised"
+        session.meta.finalized = True
+        out = tmp_path / "writeup.html"
+        export_html(session, out, writeup=True)
+        content = out.read_text()
+        assert "Result" in content
+        assert "compromised" in content
+        assert "Finalized" in content
+        assert "yes" in content
+
+
