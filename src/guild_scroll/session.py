@@ -349,6 +349,14 @@ def _read_session_meta(log_file: Path) -> Optional[dict]:
     return None
 
 
+def delete_session(session_name: str) -> None:
+    """Permanently delete a session directory and all associated data."""
+    sess_dir = _session_dir(session_name)
+    if not sess_dir.exists():
+        raise FileNotFoundError(f"Session not found: {session_name!r}")
+    shutil.rmtree(str(sess_dir))
+
+
 def get_session_status() -> Optional[dict]:
     """
     Return the active session info if one is running (detected via env var),
