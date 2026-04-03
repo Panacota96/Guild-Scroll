@@ -9,8 +9,8 @@ MODE="${1:-serve}"
 case "$MODE" in
     serve)
         # Start the web server (gscroll serve)
-        echo "[*] Starting Guild Scroll web server on http://0.0.0.0:8080"
-        exec gscroll serve --host 0.0.0.0 --port 8080
+        echo "[*] Starting Guild Scroll web server on http://127.0.0.1:8080"
+        exec gscroll serve --host 127.0.0.1 --port 8080
         ;;
     
     cli)
