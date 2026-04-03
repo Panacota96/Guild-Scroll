@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Optional
 
 from guild_scroll.config import RAW_IO_LOG_NAME
 from guild_scroll.session_loader import LoadedSession
@@ -77,7 +78,7 @@ def extract_command_outputs(raw_io_path: Path) -> list[str]:
         # Extract the command typed after the last known prompt terminator.
         # Supports traditional shells (%, $, #) and modern themes (❯, ➜, >, →, λ).
         m = _PROMPT_TERMINATOR_RE.search(prompt_line.rstrip('\n'))
-        typed: str | None = m.group(1).strip() if m else None
+        typed: Optional[str] = m.group(1).strip() if m else None
 
         # Skip the 'exit' command — the session ends and it is not a recorded command.
         if typed is not None and typed.lower() == 'exit':
