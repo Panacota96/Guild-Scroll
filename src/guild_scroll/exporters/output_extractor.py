@@ -30,7 +30,8 @@ _PROMPT_RE = re.compile(r'\[REC\][^\n]*\n')
 # Matches common shell prompt terminators (traditional and modern themes).
 # Traditional: %, $, #
 # Modern (Oh My Zsh, Powerlevel10k, Fish, …): ❯, ➜, >, →, λ
-_PROMPT_TERMINATOR_RE = re.compile(r'[%$#❯➜>→λ]\s*(.+)$')
+# The greedy prefix ensures we capture text after the last terminator on the line.
+_PROMPT_TERMINATOR_RE = re.compile(r'.*[%$#❯➜>→λ]\s*(.+)$')
 
 
 def strip_ansi(text: str) -> str:
