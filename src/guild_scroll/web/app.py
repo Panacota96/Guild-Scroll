@@ -834,6 +834,12 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self._send_json({"error": "Session not found"}, status=404)
             return
+        except ValueError:
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        except OSError as exc:
+            self._send_json({"error": f"Could not delete session: {exc}"}, status=500)
+            return
         self._send_json({"deleted": session_name})
 
     def _load_filtered_session(self, raw_name: str, params: dict[str, list[str]]) -> LoadedSession:
