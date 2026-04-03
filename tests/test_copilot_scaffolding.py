@@ -96,6 +96,21 @@ class TestCopilotSkills:
         assert "CHANGELOG.md" in body
         assert "before tagging" in body.lower()
 
+    def test_doc_sync_skill_covers_required_blocks(self):
+        path = REPO_ROOT / ".github/skills/doc-sync/SKILL.md"
+        frontmatter, body = _split_frontmatter(path)
+        assert "name:" in frontmatter
+        assert "description:" in frontmatter
+        # Must document the four required content blocks
+        assert "Purpose" in body
+        assert "Basic Workflow" in body or "Workflow" in body
+        assert "Relationship" in body or "Relationships" in body
+        assert "Example" in body
+        # Must reference the canonical docs
+        assert "README.md" in body
+        assert "docs/" in body
+        assert "check_markdown_links" in body
+
 
 class TestCopilotHookAndWorkspaceGuidance:
     def test_version_check_hook_documents_command_and_checks(self):

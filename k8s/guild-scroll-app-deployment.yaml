@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guild-scroll-app
+  namespace: guild-scroll
+  labels:
+    app: guild-scroll
+    component: app
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: guild-scroll
+      component: app
+  template:
+    metadata:
+      labels:
+        app: guild-scroll
+        component: app
+    spec:
+      serviceAccountName: guild-scroll
+      containers:
+      - name: guild-scroll-app
+        image: guild-scroll:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: guild-scroll-config
+        volumeMounts:
+        - name: guild-scroll-sessions
+          mountPath: /work/guild_scroll
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /api/sessions
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/sessions
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 2
+        securityContext:
+          runAsNonRoot: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+              - ALL
+      volumes:
+      - name: guild-scroll-sessions
+        persistentVolumeClaim:
+          claimName: guild-scroll-sessions
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30

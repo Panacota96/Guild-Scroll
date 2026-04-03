@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: guild-scroll
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - persistent-volume-claim.yaml
+  - rbac.yaml
+  - guild-scroll-app-deployment.yaml
+  - kali-recorder-statefulset.yaml
+  - services.yaml
+
+images:
+  - name: guild-scroll
+    newName: guild-scroll
+    newTag: latest
+  - name: guild-scroll-kali
+    newName: guild-scroll-kali
+    newTag: latest
+
+replicas:
+  - name: guild-scroll-app
+    count: 1
+  - name: kali-recorder
+    count: 1
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: guild-scroll
+      app.kubernetes.io/version: "1.0"
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: guild-scroll

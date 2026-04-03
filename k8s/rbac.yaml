@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: guild-scroll
+  namespace: guild-scroll
+  labels:
+    app: guild-scroll
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: guild-scroll
+  namespace: guild-scroll
+  labels:
+    app: guild-scroll
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: guild-scroll
+  namespace: guild-scroll
+  labels:
+    app: guild-scroll
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: guild-scroll
+subjects:
+- kind: ServiceAccount
+  name: guild-scroll
+  namespace: guild-scroll

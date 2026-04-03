@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kali-recorder
+  namespace: guild-scroll
+  labels:
+    app: guild-scroll
+    component: recorder
+spec:
+  serviceName: kali-recorder
+  replicas: 1
+  selector:
+    matchLabels:
+      app: guild-scroll
+      component: recorder
+  template:
+    metadata:
+      labels:
+        app: guild-scroll
+        component: recorder
+    spec:
+      serviceAccountName: guild-scroll
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: kali-recorder
+        image: guild-scroll-kali:latest
+        imagePullPolicy: IfNotPresent
+        stdin: true
+        tty: true
+        envFrom:
+        - configMapRef:
+            name: guild-scroll-config
+        env:
+        - name: GUILD_SCROLL_SESSION
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: guild-scroll-sessions
+          mountPath: /work/guild_scroll
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        securityContext:
+          runAsNonRoot: false
+          allowPrivilegeEscalation: true
+          readOnlyRootFilesystem: false
+      volumes:
+      - name: guild-scroll-sessions
+        persistentVolumeClaim:
+          claimName: guild-scroll-sessions-pvc
+      restartPolicy: Always

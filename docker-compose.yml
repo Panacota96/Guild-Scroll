@@ -1,0 +1,54 @@
+services:
+  guild-scroll-app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.guild-scroll
+    container_name: guild-scroll-app
+    image: ${GUILD_SCROLL_APP_IMAGE:-guild-scroll:latest}
+    pull_policy: ${GUILD_SCROLL_PULL_POLICY:-if_not_present}
+    ports:
+      - "8080:8080"
+    environment:
+      - GUILD_SCROLL_DIR=/work/guild_scroll
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - guild-scroll-sessions:/work/guild_scroll
+    networks:
+      - guild-scroll-net
+    command: serve
+    restart: unless-stopped
+    depends_on:
+      - kali-recorder
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/sessions"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  kali-recorder:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.kali
+    container_name: kali-recorder
+    image: ${GUILD_SCROLL_RECORDER_IMAGE:-guild-scroll-kali:latest}
+    pull_policy: ${GUILD_SCROLL_PULL_POLICY:-if_not_present}
+    environment:
+      - GUILD_SCROLL_DIR=/work/guild_scroll
+      - PYTHONUNBUFFERED=1
+      - GUILD_SCROLL_SESSION=kali-session
+    volumes:
+      - guild-scroll-sessions:/work/guild_scroll
+    networks:
+      - guild-scroll-net
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  guild-scroll-sessions:
+    driver: local
+
+networks:
+  guild-scroll-net:
+    driver: bridge

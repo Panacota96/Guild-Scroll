@@ -59,7 +59,8 @@ def _build_default_markdown(session: LoadedSession, start_dt: datetime, duration
     for cmd in session.commands:
         rel = _relative(start_dt, cmd.timestamp_start)
         tag = tag_command(cmd.command) or "—"
-        command_cell = f"`{cmd.command.replace('|', '\\|')}`"
+        escaped_cmd = cmd.command.replace('|', r'\|')
+        command_cell = f"`{escaped_cmd}`"
         cwd = cmd.working_directory or "—"
         if multipart:
             lines.append(
@@ -201,7 +202,8 @@ def _build_writeup_markdown(session: LoadedSession, start_dt: datetime, duration
         for cmd in session.commands:
             rel = _relative(start_dt, cmd.timestamp_start)
             phase = tag_command(cmd.command) or "unknown"
-            lines.append(f"| {cmd.seq} | {rel} | `{cmd.command.replace('|', '\\|')}` | {cmd.exit_code} | {phase} |")
+            escaped_cmd = cmd.command.replace('|', r'\|')
+            lines.append(f"| {cmd.seq} | {rel} | `{escaped_cmd}` | {cmd.exit_code} | {phase} |")
     else:
         lines.append("No commands recorded.")
     lines.append("")
