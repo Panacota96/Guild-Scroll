@@ -232,11 +232,11 @@ kubectl port-forward -n guild-scroll svc/guild-scroll-app 8080:8080
 
 **Kali Recorder Shell**:
 ```bash
-# Connect to the Kali StatefulSet pod
-kubectl exec -it -n guild-scroll statefulset/kali-recorder -- zsh
+# Start a recorded Guild Scroll session in the Kali StatefulSet pod
+kubectl exec -it -n guild-scroll statefulset/kali-recorder -- gscroll start k8s-session
 
-# Or directly:
-kubectl exec -it -n guild-scroll kali-recorder-0 -- zsh
+# Or target the pod directly:
+kubectl exec -it -n guild-scroll kali-recorder-0 -- gscroll start k8s-session
 ```
 
 ### Stop Deployment
