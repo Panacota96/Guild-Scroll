@@ -26,6 +26,11 @@ _ANSI_RE = re.compile(
 # Matches a full prompt line: anything containing [REC] up to and including \n
 _PROMPT_RE = re.compile(r'\[REC\][^\n]*\n')
 
+# Matches common shell prompt terminators (traditional and modern themes).
+# Traditional: %, $, #
+# Modern (Oh My Zsh, Powerlevel10k, Fish, …): ❯, ➜, >, →, λ
+_PROMPT_TERMINATOR_RE = re.compile(r'[%$#❯➜>→λ]\s*(.+)$')
+
 
 def strip_ansi(text: str) -> str:
     """Remove ANSI/VT escape sequences from *text*."""
@@ -69,13 +74,27 @@ def extract_command_outputs(raw_io_path: Path) -> list[str]:
 
     outputs: list[str] = []
     for i, prompt_line in enumerate(prompt_lines):
-        # Extract the command typed after the last %, $, or # on the line.
-        m = re.search(r'[%$#]\s*(.+)$', prompt_line.rstrip('\n'))
-        typed = m.group(1).strip() if m else ''
-        if not typed or typed.lower() == 'exit':
-            continue  # skip empty Enter or exit
+        # Extract the command typed after the last known prompt terminator.
+        # Supports traditional shells (%, $, #) and modern themes (❯, ➜, >, →, λ).
+        m = _PROMPT_TERMINATOR_RE.search(prompt_line.rstrip('\n'))
+        typed: str | None = m.group(1).strip() if m else None
+
+        # Skip the 'exit' command — the session ends and it is not a recorded command.
+        if typed is not None and typed.lower() == 'exit':
+            continue
 
         raw_output = parts[i + 1] if i + 1 < len(parts) else ''
+
+        if typed is not None:
+            # Known prompt format: skip empty Enter presses (nothing was typed).
+            if not typed:
+                continue
+        else:
+            # Unknown prompt format: use output content as a heuristic.
+            # An empty Enter produces no output; a real command produces some.
+            if not raw_output.strip():
+                continue
+
         outputs.append(raw_output.strip())
 
     return outputs

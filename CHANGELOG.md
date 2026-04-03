@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.8.1] — 2026-04-03
+
+### Fixed
+
+- **Command output no longer shows "No output captured" for users with modern shell prompts** — `extract_command_outputs` in `output_extractor.py` previously only recognised `%`, `$`, and `#` as prompt terminators, so sessions recorded under Oh My Zsh, Powerlevel10k, Fish, or any theme that uses `❯`, `➜`, `>`, `→`, or `λ` returned an empty output list, causing every command to display "No output captured" in HTML/Markdown exports and the web UI.  The fix extends the recognised terminator set to include those modern characters and adds a content-based fallback for any other unknown prompt format.
+
+---
+
 ## [0.8.0] — 2026-04-03
 
 ### Added
