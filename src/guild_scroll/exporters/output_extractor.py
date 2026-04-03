@@ -76,27 +76,31 @@ def extract_command_outputs(raw_io_path: Path) -> list[str]:
 
     outputs: list[str] = []
     for i, prompt_line in enumerate(prompt_lines):
+        prompt_text = prompt_line.rstrip('\n')
+
         # Extract the command typed after the last known prompt terminator.
         # Supports traditional shells (%, $, #) and modern themes (❯, ➜, >, →, λ).
-        m = _PROMPT_TERMINATOR_RE.search(prompt_line.rstrip('\n'))
+        m = _PROMPT_TERMINATOR_RE.search(prompt_text)
         typed: Optional[str] = m.group(1).strip() if m else None
 
-        # Skip the 'exit' command — the session ends and it is not a recorded command.
-        if typed is not None and typed.lower() == 'exit':
-            continue
+        # Independently derive a fallback candidate from the injected [REC] line
+        # so that bare Enter and 'exit' can still be skipped even when the prompt
+        # format is unknown to _PROMPT_TERMINATOR_RE.
+        fallback_typed: Optional[str] = None
+        rec_index = prompt_text.find("[REC]")
+        if rec_index != -1:
+            fallback_typed = prompt_text[rec_index + len("[REC]"):].strip()
+
+        typed_for_skip = typed if typed is not None else fallback_typed
+        if typed_for_skip is not None:
+            # Skip bare Enter presses and the terminal 'exit' command; neither is
+            # represented in LoadedSession.commands.
+            if not typed_for_skip:
+                continue
+            if typed_for_skip.lower() == 'exit':
+                continue
 
         raw_output = parts[i + 1] if i + 1 < len(parts) else ''
-
-        if typed is not None:
-            # Known prompt format: skip empty Enter presses (nothing was typed).
-            if not typed:
-                continue
-        else:
-            # Unknown prompt format: use output content as a heuristic.
-            # An empty Enter produces no output; a real command produces some.
-            if not raw_output.strip():
-                continue
-
         outputs.append(raw_output.strip())
 
     return outputs
