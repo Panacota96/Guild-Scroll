@@ -75,6 +75,19 @@ class TestStartCommand:
             result = runner.invoke(cli, ["start", "test-session"])
         assert result.exit_code == 0
         assert "test-session" in result.output
+        assert "[REC] Starting session 'test-session'" in result.output
+
+    def test_start_join_shows_rec_indicator(self, isolated_sessions_dir):
+        from guild_scroll.config import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "test-session")
+        runner = CliRunner()
+        with patch("guild_scroll.session.start_recording") as mock_rec:
+            mock_rec.return_value = 0
+            result = runner.invoke(cli, ["start", "test-session", "--join"])
+        assert result.exit_code == 0
+        assert "[REC] Joining session 'test-session'" in result.output
 
 
 class TestVersionFlag:

@@ -102,9 +102,9 @@ def start(session_name, join_session):
         session_name = click.prompt("Session name", default="session")
 
     if join_session:
-        click.echo(f"[gscroll] Joining session '{session_name}' as a new part — type 'exit' or Ctrl-D to stop.")
+        click.echo(f"[REC] Joining session '{session_name}' as a new part — type 'exit' or Ctrl-D to stop.")
     else:
-        click.echo(f"[gscroll] Starting session '{session_name}' — type 'exit' or Ctrl-D to stop.")
+        click.echo(f"[REC] Starting session '{session_name}' — type 'exit' or Ctrl-D to stop.")
     start_session(session_name, join=join_session)
     click.echo("[gscroll] Session ended and logs saved.")
 

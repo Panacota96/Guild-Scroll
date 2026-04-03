@@ -245,7 +245,7 @@ See [DOCKER.md](DOCKER.md) for full Docker + Kubernetes guide, including trouble
 ## Quick Start
 
 ```bash
-# Start a new session
+# Start a new session ([REC] shown in startup output and prompt)
 gscroll start htb-machine
 
 # Check active recording status (shows [REC] when active)
