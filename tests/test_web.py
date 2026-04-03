@@ -579,6 +579,20 @@ class TestDeleteSession:
         assert headers["Content-Type"].startswith("application/json")
         assert "disk full" in payload["error"]
 
+    def test_delete_permission_error_returns_500(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "permerr-session")
+
+        with patch("guild_scroll.web.app.delete_session", side_effect=PermissionError("permission denied")):
+            with _running_server() as server:
+                status, headers, body = _request(server, "/api/session/permerr-session", method="DELETE")
+
+        payload = json.loads(body)
+        assert status == 500
+        assert headers["Content-Type"].startswith("application/json")
+        assert "permission denied" in payload["error"]
+
     def test_delete_valueerror_returns_400(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()
         sessions_dir.mkdir(parents=True, exist_ok=True)
