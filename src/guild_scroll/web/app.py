@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
@@ -55,12 +56,6 @@ _HEARTBEAT_EXPIRY_SECS = 90.0
 # ── Terminal constants ─────────────────────────────────────────────────────────
 _TERMINAL_MAX_INPUT_BYTES = 4096
 
-# ── Module-level state ─────────────────────────────────────────────────────────
-_session_heartbeats: dict[str, float] = {}
-_heartbeats_lock = threading.Lock()
-_active_terminals: dict[str, _TerminalInfo] = {}  # type: ignore[name-defined]
-_terminals_lock = threading.Lock()
-
 
 class _TerminalInfo:
     """State for a live PTY terminal attached to a recording session."""
@@ -92,8 +87,11 @@ class _TerminalInfo:
             return False
 
 
-# Fix forward-reference so dict type annotation resolves at runtime
+# ── Module-level state (declared after _TerminalInfo) ─────────────────────────
+_session_heartbeats: dict[str, float] = {}
+_heartbeats_lock = threading.Lock()
 _active_terminals: dict[str, _TerminalInfo] = {}
+_terminals_lock = threading.Lock()
 
 
 # ── Heartbeat helpers ──────────────────────────────────────────────────────────
@@ -1455,7 +1453,13 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Invalid session name."}, status=400)
             return
         sessions_dir = get_sessions_dir()
-        session_dir = sessions_dir / name
+        # Resolve and re-validate to surface the path clearly before any file I/O
+        try:
+            session_dir = (sessions_dir / name).resolve(strict=False)
+            session_dir.relative_to(sessions_dir.resolve())
+        except ValueError:
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
         if session_dir.exists():
             self._send_json({"error": f"Session already exists: {name}"}, status=409)
             return
@@ -1482,7 +1486,12 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Invalid session name."}, status=400)
             return
         sessions_dir = get_sessions_dir()
-        session_dir = sessions_dir / session_name
+        try:
+            session_dir = (sessions_dir / session_name).resolve(strict=False)
+            session_dir.relative_to(sessions_dir.resolve())
+        except ValueError:
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
         if not session_dir.exists():
             self._send_json({"error": "Session not found"}, status=404)
             return
@@ -1527,10 +1536,17 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             while dest.exists():
                 dest = uploads_dir / f"{stem}_{counter}{suffix}"
                 counter += 1
-        dest.write_bytes(data)
-        asset_url = f"/api/session/{quote(session_name)}/asset/{quote(dest.name, safe='')}"
+        # Resolve and validate before writing to rule out any path traversal in filename
+        try:
+            resolved_dest = dest.resolve(strict=False)
+            resolved_dest.relative_to(uploads_dir.resolve())
+        except ValueError:
+            self._send_json({"error": "Invalid upload filename."}, status=400)
+            return
+        resolved_dest.write_bytes(data)
+        asset_url = f"/api/session/{quote(session_name)}/asset/{quote(resolved_dest.name, safe='')}"
         self._send_json({
-            "filename": dest.name,
+            "filename": resolved_dest.name,
             "size": len(data),
             "content_type": content_type_or_err,
             "url": asset_url,
@@ -1545,18 +1561,19 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         sessions_dir = get_sessions_dir()
         asset_path = sessions_dir / session_name / "assets" / "uploads" / safe_fn
         try:
-            asset_path.resolve().relative_to(
+            resolved_asset = asset_path.resolve()
+            resolved_asset.relative_to(
                 (sessions_dir / session_name / "assets").resolve()
             )
-        except ValueError:
+        except (ValueError, OSError):
             self._send_json({"error": "Invalid asset path."}, status=400)
             return
-        if not asset_path.is_file():
+        if not resolved_asset.is_file():
             self._send_json({"error": "Asset not found"}, status=404)
             return
-        suffix = asset_path.suffix.lower()
+        suffix = resolved_asset.suffix.lower()
         content_type = _ALLOWED_UPLOAD_EXTENSIONS.get(suffix, "application/octet-stream")
-        self._send_bytes(asset_path.read_bytes(), content_type=content_type)
+        self._send_bytes(resolved_asset.read_bytes(), content_type=content_type)
 
     # ── Heartbeat ──────────────────────────────────────────────────────────────
 
@@ -1571,7 +1588,6 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         last_beat = None
         if ts is not None:
             delta = time.monotonic() - ts
-            from datetime import datetime, timedelta, timezone
             last_beat = (datetime.now(timezone.utc) - timedelta(seconds=delta)).isoformat()
         self._send_json({
             "session": session_name,
@@ -1605,7 +1621,12 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Terminal not supported on this platform"}, status=501)
             return
         sessions_dir = get_sessions_dir()
-        session_dir = sessions_dir / session_name
+        try:
+            session_dir = (sessions_dir / session_name).resolve(strict=False)
+            session_dir.relative_to(sessions_dir.resolve())
+        except ValueError:
+            self._send_json({"error": "Session not found"}, status=404)
+            return
         if not session_dir.exists():
             self._send_json({"error": "Session not found"}, status=404)
             return
