@@ -237,6 +237,7 @@ def _render_index_page(sessions: list[dict]) -> str:
             name = str(session.get("session_name") or "unknown")
             start_time = _format_start_time(session.get("start_time"))
             raw_start = str(session.get("start_time") or "")
+            raw_host = str(session.get("hostname") or "").lower()
             hostname = _format_hostname(session.get("hostname"))
             command_count = _format_command_count(session.get("command_count"))
             quoted_name = quote(name, safe="")
@@ -274,7 +275,7 @@ def _render_index_page(sessions: list[dict]) -> str:
                     js_display_name=js_display_name,
                     data_name=html.escape(name.lower()),
                     data_start=html.escape(raw_start),
-                    data_host=html.escape(hostname.lower()),
+                    data_host=html.escape(raw_host),
                 )
             )
         cards = "\n".join(card_items)
