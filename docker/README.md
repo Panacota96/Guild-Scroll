@@ -101,12 +101,13 @@ docker run guild-scroll:latest gscroll list
 **Output** (in container):
 ```
 ╔════════════════════════════════════════════╗
-║    Guild Scroll - Kali Recorder Active     ║
+║     Guild Scroll - Kali Recorder Ready     ║
 ╚════════════════════════════════════════════╝
 
 📝 Session Name: kali-session-20260403-143022
 📁 Session Path: /work/guild_scroll/sessions/kali-session-20260403-143022
-🔴 [REC] Recording in progress
+⏸️  Recording not started yet
+▶️  Run `gscroll start` to begin recording
 ```
 
 ---
