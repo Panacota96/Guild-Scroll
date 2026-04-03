@@ -115,10 +115,14 @@ jobs:
           - guild-scroll-kali
 
     steps:
+      - name: Get short SHA
+        id: short_sha
+        run: echo "sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.ref_name == github.event.repository.default_branch && 'latest' || format('sha-{0}', github.sha) }}
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.ref_name == github.event.repository.default_branch && 'latest' || format('sha-{0}', steps.short_sha.outputs.sha) }}
           format: 'sarif'
           output: 'trivy-${{ matrix.image }}.sarif'
 
