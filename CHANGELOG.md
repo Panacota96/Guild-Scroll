@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.7.1] — 2026-04-03
+
+### Fixed
+
+- **`gscroll serve --host 0.0.0.0` now works** — removed the hard-coded `127.0.0.1`-only guard in `web/app.py` and `server.py` that caused `Error: gscroll serve only supports 127.0.0.1 for safety.` in containerised environments (Exegol, Kali Docker).  A warning is printed instead when the server is bound to a non-loopback address, so users are informed of the exposure without being blocked.
+- **CLI help updated** — `--host` option now documents `0.0.0.0` as a valid value; epilog examples include `gscroll serve --host 0.0.0.0`.
+
+---
+
 ## [0.7.0] — 2026-04-02
 
 ### Added

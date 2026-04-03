@@ -455,8 +455,12 @@ loadCommands();
 def create_server(default_session: Optional[str], port: int = 1551, host: str = "127.0.0.1") -> GuildScrollServer:
     if port < 0 or port > 65535:
         raise ValueError("Port must be between 0 and 65535")
-    if host != "127.0.0.1":
-        raise ValueError("Host must be 127.0.0.1")
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        print(
+            f"[gscroll] WARNING: server bound to {host} — "
+            "accessible beyond loopback. Use only on trusted networks.",
+            flush=True,
+        )
     state = ServerState(default_session=default_session)
     return GuildScrollServer(host, port, state)
 
