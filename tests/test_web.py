@@ -1218,3 +1218,344 @@ class TestTerminal:
         # terminal.log should exist
         log_path = sessions_dir / "term-full" / "terminal.log"
         assert log_path.exists()
+
+
+# ── GET /api/sessions ─────────────────────────────────────────────────────────
+
+
+class TestSessionsApi:
+    def test_returns_empty_list_when_no_sessions(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, headers, body = _request(server, "/api/sessions")
+
+        payload = json.loads(body)
+        assert status == 200
+        assert headers["Content-Type"].startswith("application/json")
+        assert payload == {"sessions": []}
+
+    def test_returns_list_with_created_sessions(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "alpha-api")
+        _make_session(sessions_dir, "beta-api")
+
+        with _running_server() as server:
+            status, headers, body = _request(server, "/api/sessions")
+
+        payload = json.loads(body)
+        assert status == 200
+        assert headers["Content-Type"].startswith("application/json")
+        names = [s["session_name"] for s in payload["sessions"]]
+        assert "alpha-api" in names
+        assert "beta-api" in names
+
+    def test_response_includes_security_headers(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, headers, body = _request(server, "/api/sessions")
+
+        assert status == 200
+        assert headers["X-Content-Type-Options"] == "nosniff"
+        assert headers["X-Frame-Options"] == "DENY"
+
+    def test_session_meta_fields_present(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _write_session_meta(
+            sessions_dir,
+            "meta-check",
+            start_time="2024-01-01T00:00:00Z",
+            hostname="test-host",
+            command_count=3,
+        )
+
+        with _running_server() as server:
+            _, _, body = _request(server, "/api/sessions")
+
+        payload = json.loads(body)
+        session = next(s for s in payload["sessions"] if s["session_name"] == "meta-check")
+        assert session["hostname"] == "test-host"
+        assert session["command_count"] == 3
+
+
+# ── GET /api/session/{name} ───────────────────────────────────────────────────
+
+
+class TestSessionApi:
+    def test_returns_200_with_session_data(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "api-session")
+
+        with _running_server() as server:
+            status, headers, body = _request(server, "/api/session/api-session")
+
+        payload = json.loads(body)
+        assert status == 200
+        assert headers["Content-Type"].startswith("application/json")
+        assert payload["session"]["session_name"] == "api-session"
+        assert "commands" in payload
+        assert "notes" in payload
+        assert "assets" in payload
+
+    def test_returns_404_for_missing_session(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, headers, body = _request(server, "/api/session/no-such-session")
+
+        payload = json.loads(body)
+        assert status == 404
+        assert headers["Content-Type"].startswith("application/json")
+        assert "not found" in payload["error"].lower()
+
+    def test_returns_400_for_traversal_attempt(self, isolated_sessions_dir):
+        with _running_server() as server:
+            status, headers, body = _request(server, "/api/session/../escape")
+
+        payload = json.loads(body)
+        assert status == 400
+        assert headers["Content-Type"].startswith("application/json")
+        assert payload["error"] == "Invalid session name."
+
+    def test_returns_commands_in_response(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _write_session_records(
+            sessions_dir,
+            "cmd-session",
+            [
+                {
+                    "type": "session_meta",
+                    "session_name": "cmd-session",
+                    "session_id": "t01",
+                    "start_time": "2024-06-01T10:00:00Z",
+                    "hostname": "kali",
+                    "command_count": 2,
+                },
+                {
+                    "type": "command",
+                    "seq": 1,
+                    "command": "nmap -sV target",
+                    "timestamp_start": "2024-06-01T10:01:00Z",
+                    "timestamp_end": "2024-06-01T10:01:05Z",
+                    "exit_code": 0,
+                    "working_directory": "/home/user",
+                    "part": 1,
+                },
+                {
+                    "type": "command",
+                    "seq": 2,
+                    "command": "id",
+                    "timestamp_start": "2024-06-01T10:02:00Z",
+                    "timestamp_end": "2024-06-01T10:02:01Z",
+                    "exit_code": 0,
+                    "working_directory": "/home/user",
+                    "part": 1,
+                },
+            ],
+        )
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/api/session/cmd-session")
+
+        payload = json.loads(body)
+        assert status == 200
+        commands = payload["commands"]
+        assert len(commands) == 2
+        cmd_texts = [c["command"] for c in commands]
+        assert "nmap -sV target" in cmd_texts
+        assert "id" in cmd_texts
+
+    def test_search_filter_returns_matching_commands(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _write_session_records(
+            sessions_dir,
+            "filter-session",
+            [
+                {
+                    "type": "session_meta",
+                    "session_name": "filter-session",
+                    "session_id": "t02",
+                    "start_time": "2024-06-01T10:00:00Z",
+                    "hostname": "kali",
+                    "command_count": 3,
+                },
+                {
+                    "type": "command",
+                    "seq": 1,
+                    "command": "nmap -sV target",
+                    "timestamp_start": "2024-06-01T10:01:00Z",
+                    "timestamp_end": "2024-06-01T10:01:05Z",
+                    "exit_code": 0,
+                    "working_directory": "/tmp",
+                    "part": 1,
+                },
+                {
+                    "type": "command",
+                    "seq": 2,
+                    "command": "ls -la",
+                    "timestamp_start": "2024-06-01T10:02:00Z",
+                    "timestamp_end": "2024-06-01T10:02:01Z",
+                    "exit_code": 0,
+                    "working_directory": "/tmp",
+                    "part": 1,
+                },
+                {
+                    "type": "command",
+                    "seq": 3,
+                    "command": "id",
+                    "timestamp_start": "2024-06-01T10:03:00Z",
+                    "timestamp_end": "2024-06-01T10:03:01Z",
+                    "exit_code": 0,
+                    "working_directory": "/tmp",
+                    "part": 1,
+                },
+            ],
+        )
+
+        from urllib.parse import urlencode
+        params = urlencode({"tool": "nmap"})
+        with _running_server() as server:
+            status, _, body = _request(server, f"/api/session/filter-session?{params}")
+
+        payload = json.loads(body)
+        assert status == 200
+        commands = payload["commands"]
+        assert len(commands) == 1
+        assert commands[0]["command"] == "nmap -sV target"
+
+    def test_response_includes_security_headers(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "hdr-session")
+
+        with _running_server() as server:
+            status, headers, _ = _request(server, "/api/session/hdr-session")
+
+        assert status == 200
+        assert headers["X-Content-Type-Options"] == "nosniff"
+        assert headers["X-Frame-Options"] == "DENY"
+
+
+# ── GET /api/session/{name}/download ─────────────────────────────────────────
+
+
+class TestDownload:
+    def test_download_markdown_returns_content_disposition(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "dl-session")
+
+        with _running_server() as server:
+            status, headers, body = _request(
+                server, "/api/session/dl-session/download?format=md"
+            )
+
+        assert status == 200
+        assert "text/markdown" in headers["Content-Type"]
+        disposition = headers.get("Content-Disposition", "")
+        assert "attachment" in disposition
+        assert "dl-session" in disposition
+        assert ".md" in disposition
+
+    def test_download_html_returns_html_content_type(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "dl-html")
+
+        with _running_server() as server:
+            status, headers, body = _request(
+                server, "/api/session/dl-html/download?format=html"
+            )
+
+        assert status == 200
+        assert "text/html" in headers["Content-Type"]
+        content = body.decode("utf-8")
+        assert "dl-html" in content
+
+    def test_download_missing_format_returns_400(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "dl-no-fmt")
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/api/session/dl-no-fmt/download")
+
+        assert status == 400
+
+    def test_download_invalid_format_returns_400(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "dl-bad-fmt")
+
+        with _running_server() as server:
+            status, _, body = _request(
+                server, "/api/session/dl-bad-fmt/download?format=xlsx"
+            )
+
+        assert status == 400
+
+    def test_download_missing_session_returns_404(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, _, body = _request(
+                server, "/api/session/no-such/download?format=md"
+            )
+
+        assert status == 404
+
+    def test_download_traversal_returns_400(self, isolated_sessions_dir):
+        with _running_server() as server:
+            status, _, body = _request(
+                server, "/api/session/../etc/download?format=md"
+            )
+
+        assert status == 400
+
+    def test_download_markdown_contains_session_name(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _write_session_records(
+            sessions_dir,
+            "dl-cmd",
+            [
+                {
+                    "type": "session_meta",
+                    "session_name": "dl-cmd",
+                    "session_id": "dl01",
+                    "start_time": "2024-06-01T10:00:00Z",
+                    "hostname": "kali",
+                    "command_count": 1,
+                },
+                {
+                    "type": "command",
+                    "seq": 1,
+                    "command": "whoami",
+                    "timestamp_start": "2024-06-01T10:01:00Z",
+                    "timestamp_end": "2024-06-01T10:01:01Z",
+                    "exit_code": 0,
+                    "working_directory": "/home/user",
+                    "part": 1,
+                },
+            ],
+        )
+
+        with _running_server() as server:
+            status, _, body = _request(
+                server, "/api/session/dl-cmd/download?format=md"
+            )
+
+        assert status == 200
+        content = body.decode("utf-8")
+        assert "dl-cmd" in content
+        assert "whoami" in content
