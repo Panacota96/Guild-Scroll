@@ -99,7 +99,7 @@ class TestVersionFlag:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.10.0" in result.output
+        assert "0.11.0" in result.output
 
 
 class TestUpdateCommand:

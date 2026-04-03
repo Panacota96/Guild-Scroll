@@ -92,6 +92,41 @@ def _request(server, path: str, method: str = "GET"):
         return exc.code, exc.headers, exc.read()
 
 
+def _request_post(server, path: str, body: bytes, content_type: str = "application/json"):
+    url = f"http://127.0.0.1:{server.server_port}{path}"
+    request = Request(url, data=body, method="POST")
+    request.add_header("Content-Type", content_type)
+    request.add_header("Content-Length", str(len(body)))
+    try:
+        with urlopen(request) as response:
+            return response.status, response.headers, response.read()
+    except HTTPError as exc:
+        return exc.code, exc.headers, exc.read()
+
+
+def _multipart_body(filename: str, data: bytes, field: str = "file") -> tuple[bytes, str]:
+    """Build a minimal multipart/form-data body."""
+    boundary = "TestBoundary12345"
+    ext = Path(filename).suffix or ""
+    content_type_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
+        ".pdf": "application/pdf",
+    }
+    file_ct = content_type_map.get(ext, "application/octet-stream")
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'
+        f"Content-Type: {file_ct}\r\n"
+        f"\r\n"
+    ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
+    return body, f"multipart/form-data; boundary={boundary}"
+
+
 class TestIsSafeSessionName:
     def test_rejects_traversal_strings(self, isolated_sessions_dir):
         assert not _is_safe_session_name("../escape")
@@ -735,3 +770,446 @@ class TestDeleteSession:
 
         assert status == 200
         assert not sess_dir.exists()
+
+
+# ── PNG/JPEG magic bytes for test payloads ────────────────────────────────────
+_PNG_HEADER = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+_JPEG_HEADER = b"\xff\xd8\xff\xe0" + b"\x00" * 20
+_PDF_HEADER = b"%PDF-1.4\n" + b"\x00" * 20
+_WEBP_HEADER = b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 20
+_SVG_PAYLOAD = b"<svg xmlns='http://www.w3.org/2000/svg'><circle r='5'/></svg>"
+
+
+class TestSessionCreate:
+    def test_post_api_sessions_creates_session(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            body = json.dumps({"name": "web-created"}).encode()
+            status, headers, resp = _request_post(server, "/api/sessions", body)
+
+        payload = json.loads(resp)
+        assert status == 201
+        assert payload["session"] == "web-created"
+        assert "/session/web-created" in payload["url"]
+        assert (sessions_dir / "web-created" / "logs" / SESSION_LOG_NAME).exists()
+
+    def test_post_api_sessions_sanitizes_name(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            body = json.dumps({"name": "My Session!!"}).encode()
+            status, _, resp = _request_post(server, "/api/sessions", body)
+
+        payload = json.loads(resp)
+        assert status == 201
+        assert payload["session"] == "my-session"
+
+    def test_post_api_sessions_rejects_duplicate(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "exists-already")
+
+        with _running_server() as server:
+            body = json.dumps({"name": "exists-already"}).encode()
+            status, _, resp = _request_post(server, "/api/sessions", body)
+
+        payload = json.loads(resp)
+        assert status == 409
+        assert "already exists" in payload["error"]
+
+    def test_post_api_sessions_requires_name(self, isolated_sessions_dir):
+        get_sessions_dir().mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            body = json.dumps({}).encode()
+            status, _, resp = _request_post(server, "/api/sessions", body)
+
+        payload = json.loads(resp)
+        assert status == 400
+        assert "name" in payload["error"].lower()
+
+    def test_index_page_has_new_session_button(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "alpha")
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/")
+
+        content = body.decode("utf-8")
+        assert status == 200
+        assert "gsNewSession" in content
+        assert "New Session" in content
+        assert "new-session-btn" in content
+
+
+class TestHeartbeat:
+    def test_heartbeat_post_marks_session_live(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "hb-session")
+
+        with _running_server() as server:
+            post_body = b""
+            status, _, resp = _request_post(
+                server, "/api/session/hb-session/heartbeat", post_body
+            )
+
+        payload = json.loads(resp)
+        assert status == 200
+        assert payload["status"] == "ok"
+        assert payload["session"] == "hb-session"
+        assert isinstance(payload["expires_in"], int)
+
+    def test_heartbeat_get_returns_live_after_post(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "hb-get")
+
+        with _running_server() as server:
+            _request_post(server, "/api/session/hb-get/heartbeat", b"")
+            status, _, resp = _request(server, "/api/session/hb-get/heartbeat")
+
+        payload = json.loads(resp)
+        assert status == 200
+        assert payload["status"] == "live"
+        assert payload["last_beat"] is not None
+
+    def test_heartbeat_get_returns_unknown_before_any_beat(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "hb-unknown")
+
+        with _running_server() as server:
+            status, _, resp = _request(server, "/api/session/hb-unknown/heartbeat")
+
+        payload = json.loads(resp)
+        assert status == 200
+        assert payload["status"] == "unknown"
+        assert payload["last_beat"] is None
+
+    def test_heartbeat_traversal_rejected(self, isolated_sessions_dir):
+        with _running_server() as server:
+            status, _, resp = _request(server, "/api/session/../escape/heartbeat")
+        assert status == 400
+
+    def test_session_page_has_heartbeat_badge(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "badge-session")
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/session/badge-session")
+
+        content = body.decode("utf-8")
+        assert status == 200
+        assert "gs-session-status" in content
+        assert "heartbeat-badge" in content
+        assert "gsHeartbeat" in content
+
+
+class TestAssetUpload:
+    def test_upload_valid_png_succeeds(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "upload-session")
+        (sessions_dir / "upload-session" / "assets").mkdir(exist_ok=True)
+
+        multipart, ct = _multipart_body("screenshot.png", _PNG_HEADER)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server,
+                "/api/session/upload-session/upload",
+                multipart,
+                content_type=ct,
+            )
+
+        payload = json.loads(resp)
+        assert status == 200
+        assert payload["filename"] == "screenshot.png"
+        assert payload["content_type"] == "image/png"
+        assert "/asset/" in payload["url"]
+        upload_file = sessions_dir / "upload-session" / "assets" / "uploads" / "screenshot.png"
+        assert upload_file.exists()
+
+    def test_upload_valid_jpeg_succeeds(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "upload-jpeg")
+        (sessions_dir / "upload-jpeg" / "assets").mkdir(exist_ok=True)
+
+        multipart, ct = _multipart_body("photo.jpg", _JPEG_HEADER)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server, "/api/session/upload-jpeg/upload", multipart, content_type=ct
+            )
+
+        payload = json.loads(resp)
+        assert status == 200
+        assert payload["content_type"] == "image/jpeg"
+
+    def test_upload_valid_svg_succeeds(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "upload-svg")
+        (sessions_dir / "upload-svg" / "assets").mkdir(exist_ok=True)
+
+        multipart, ct = _multipart_body("icon.svg", _SVG_PAYLOAD)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server, "/api/session/upload-svg/upload", multipart, content_type=ct
+            )
+
+        payload = json.loads(resp)
+        assert status == 200
+        assert payload["content_type"] == "image/svg+xml"
+
+    def test_upload_rejects_unsupported_type(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "upload-bad-type")
+        (sessions_dir / "upload-bad-type" / "assets").mkdir(exist_ok=True)
+
+        multipart, ct = _multipart_body("malware.exe", b"MZ\x90\x00" + b"\x00" * 20)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server, "/api/session/upload-bad-type/upload", multipart, content_type=ct
+            )
+
+        payload = json.loads(resp)
+        assert status == 415
+        assert "Unsupported file type" in payload["error"]
+
+    def test_upload_rejects_wrong_magic_bytes(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "upload-bad-magic")
+        (sessions_dir / "upload-bad-magic" / "assets").mkdir(exist_ok=True)
+
+        # .png extension but not PNG content
+        multipart, ct = _multipart_body("fake.png", b"notapng" + b"\x00" * 30)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server, "/api/session/upload-bad-magic/upload", multipart, content_type=ct
+            )
+
+        payload = json.loads(resp)
+        assert status == 415
+        assert ".png" in payload["error"]
+
+    def test_upload_session_not_found_returns_404(self, isolated_sessions_dir):
+        get_sessions_dir().mkdir(parents=True, exist_ok=True)
+
+        multipart, ct = _multipart_body("x.png", _PNG_HEADER)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server, "/api/session/ghost-session/upload", multipart, content_type=ct
+            )
+
+        payload = json.loads(resp)
+        assert status == 404
+        assert "not found" in payload["error"].lower()
+
+    def test_upload_traversal_rejected(self, isolated_sessions_dir):
+        multipart, ct = _multipart_body("x.png", _PNG_HEADER)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server, "/api/session/../escape/upload", multipart, content_type=ct
+            )
+
+        payload = json.loads(resp)
+        assert status == 400
+
+    def test_serve_uploaded_asset(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "serve-asset")
+        uploads_dir = sessions_dir / "serve-asset" / "assets" / "uploads"
+        uploads_dir.mkdir(parents=True)
+        (uploads_dir / "test.png").write_bytes(_PNG_HEADER)
+
+        with _running_server() as server:
+            status, headers, body = _request(
+                server, "/api/session/serve-asset/asset/test.png"
+            )
+
+        assert status == 200
+        assert headers["Content-Type"] == "image/png"
+        assert body == _PNG_HEADER
+
+    def test_serve_asset_not_found_returns_404(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "no-asset")
+        (sessions_dir / "no-asset" / "assets" / "uploads").mkdir(parents=True)
+
+        with _running_server() as server:
+            status, _, resp = _request(
+                server, "/api/session/no-asset/asset/missing.png"
+            )
+
+        assert status == 404
+
+    def test_session_page_has_upload_zone(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "upload-zone-session")
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/session/upload-zone-session")
+
+        content = body.decode("utf-8")
+        assert status == 200
+        assert "gs-upload-zone" in content
+        assert "gs-file-input" in content
+        assert "gsHandleFiles" in content
+        assert "drop" in content.lower()
+
+    def test_upload_requires_multipart_content_type(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "upload-wrong-ct")
+        (sessions_dir / "upload-wrong-ct" / "assets").mkdir(exist_ok=True)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server,
+                "/api/session/upload-wrong-ct/upload",
+                b"some bytes",
+                content_type="application/octet-stream",
+            )
+
+        payload = json.loads(resp)
+        assert status == 400
+        assert "multipart" in payload["error"].lower()
+
+
+class TestTerminal:
+    def test_session_page_has_terminal_panel(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "term-ui")
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/session/term-ui")
+
+        content = body.decode("utf-8")
+        assert status == 200
+        assert "gs-terminal-btn" in content
+        assert "gs-terminal-output" in content
+        assert "gsTerminalToggle" in content
+        assert "Open Terminal" in content
+
+    def test_terminal_start_returns_not_supported_or_started(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "term-start")
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server, "/api/session/term-start/terminal/start", b""
+            )
+
+        payload = json.loads(resp)
+        # On Linux pty is available; on other platforms we get 501
+        assert status in (200, 500, 501, 409)
+        if status == 200:
+            assert payload.get("started") is True or "pid" in payload
+
+    def test_terminal_read_unknown_session_returns_alive_false(self, isolated_sessions_dir):
+        get_sessions_dir().mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, _, resp = _request(
+                server, "/api/session/no-terminal-here/terminal/read"
+            )
+
+        payload = json.loads(resp)
+        assert status == 200
+        assert payload["alive"] is False
+        assert payload["output"] == ""
+
+    def test_terminal_stop_unknown_returns_404(self, isolated_sessions_dir):
+        get_sessions_dir().mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server, "/api/session/no-term/terminal/stop", b""
+            )
+
+        payload = json.loads(resp)
+        assert status == 404
+        assert "No active terminal" in payload["error"]
+
+    def test_terminal_write_no_input_returns_400(self, isolated_sessions_dir):
+        get_sessions_dir().mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, _, resp = _request_post(
+                server,
+                "/api/session/no-term/terminal/write",
+                json.dumps({"input": ""}).encode(),
+            )
+
+        payload = json.loads(resp)
+        assert status in (400, 404)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="pty not available on Windows")
+    def test_terminal_full_lifecycle(self, isolated_sessions_dir):
+        """Start a terminal, write a command, read output, stop it."""
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "term-full")
+
+        with _running_server() as server:
+            # Start
+            status, _, resp = _request_post(
+                server, "/api/session/term-full/terminal/start", b""
+            )
+            payload = json.loads(resp)
+            if status == 501:
+                pytest.skip("pty not available")
+            if status == 500 and "zsh not found" in payload.get("error", ""):
+                pytest.skip("zsh not available")
+            assert status == 200
+            assert payload["started"] is True
+
+            # Write
+            import time as _time
+            _time.sleep(0.3)
+            w_body = json.dumps({"input": "echo hello-guild-scroll\n"}).encode()
+            w_status, _, w_resp = _request_post(
+                server, "/api/session/term-full/terminal/write", w_body
+            )
+            assert w_status == 200
+
+            _time.sleep(0.5)
+
+            # Read
+            r_status, _, r_resp = _request(
+                server, "/api/session/term-full/terminal/read"
+            )
+            r_payload = json.loads(r_resp)
+            assert r_status == 200
+
+            # Stop
+            s_status, _, s_resp = _request_post(
+                server, "/api/session/term-full/terminal/stop", b""
+            )
+            s_payload = json.loads(s_resp)
+            assert s_status == 200
+            assert s_payload["stopped"] is True
+
+        # terminal.log should exist
+        log_path = sessions_dir / "term-full" / "terminal.log"
+        assert log_path.exists()
