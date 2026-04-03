@@ -819,9 +819,13 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
 
 
 def create_server(host: str = "127.0.0.1", port: int = 1551) -> ThreadingHTTPServer:
-    """Create a localhost-only report server."""
-    if host != "127.0.0.1":
-        raise ValueError("gscroll serve only supports 127.0.0.1 for safety.")
+    """Create the report server, binding to *host*:*port*."""
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        print(
+            f"[gscroll] WARNING: server bound to {host} — "
+            "accessible beyond loopback. Use only on trusted networks.",
+            flush=True,
+        )
     return ThreadingHTTPServer((host, port), GuildScrollRequestHandler)
 
 

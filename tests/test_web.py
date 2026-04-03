@@ -110,13 +110,15 @@ class TestIsSafeSessionName:
 
 
 class TestCreateServer:
-    def test_rejects_non_localhost_bind(self):
+    def test_non_localhost_bind_is_allowed(self, capsys):
+        server = create_server(host="0.0.0.0", port=0)
         try:
-            create_server(host="0.0.0.0", port=0)
-        except ValueError as exc:
-            assert "127.0.0.1" in str(exc)
-        else:
-            raise AssertionError("Expected ValueError for non-localhost bind")
+            assert server is not None
+            out = capsys.readouterr().out
+            assert "WARNING" in out
+            assert "0.0.0.0" in out
+        finally:
+            server.server_close()
 
     def test_html_and_json_responses_include_security_headers(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()

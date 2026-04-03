@@ -455,8 +455,10 @@ def tui(session_name):
         "Examples:\n"
         "  gscroll serve\n"
         "  gscroll serve --port 1551\n"
+        "  gscroll serve --host 0.0.0.0\n"
         "\n"
-        "Serves the report UI on localhost only."
+        "Defaults to 127.0.0.1. Use --host 0.0.0.0 to expose on all interfaces\n"
+        "(e.g. inside Exegol/Kali containers)."
     )
 )
 @click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind.")
@@ -608,20 +610,22 @@ def import_session(archive_path):
         "Examples:\n"
         "  gscroll serve\n"
         "  gscroll serve --port 1661\n"
+        "  gscroll serve --host 0.0.0.0\n"
         "\n"
-        "The web UI is intentionally localhost-only and does not provide auth.\n"
+        "Defaults to 127.0.0.1. Use --host 0.0.0.0 to expose on all interfaces\n"
+        "(e.g. inside Exegol/Kali containers). No authentication is provided.\n"
     )
 )
 @click.option(
     "--host", default="127.0.0.1", show_default=True, metavar="HOST",
-    help="Bind host. Only 127.0.0.1 is allowed.",
+    help="Bind host (e.g. 0.0.0.0 for all interfaces).",
 )
 @click.option(
     "--port", default=1551, show_default=True, type=int, metavar="PORT",
     help="Bind port for the local web server.",
 )
 def serve(host, port):
-    """Serve a localhost-only session viewer and JSON API."""
+    """Serve the session viewer and JSON API."""
     from guild_scroll.web import create_server
 
     try:
