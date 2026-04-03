@@ -14,7 +14,7 @@ from guild_scroll.exporters.html import export_html
 from guild_scroll.exporters.markdown import export_markdown
 from guild_scroll.exporters.output_extractor import build_command_output_map
 from guild_scroll.search import SearchFilter, search_commands
-from guild_scroll.session import list_sessions
+from guild_scroll.session import delete_session, list_sessions
 from guild_scroll.session_loader import LoadedSession, load_session
 
 
@@ -239,6 +239,8 @@ def _render_index_page(sessions: list[dict]) -> str:
             command_count = _format_command_count(session.get("command_count"))
             quoted_name = quote(name, safe="")
             escaped_name = html.escape(name)
+            js_session_path = json.dumps(quoted_name)
+            js_display_name = json.dumps(name)
             card_items.append(
                 """
 <article class="session-card">
@@ -255,6 +257,8 @@ def _render_index_page(sessions: list[dict]) -> str:
     <a class="rune-link" href="/session/{session_path}">Open Session</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
+    <button class="rune-link danger-link" type="button"
+      onclick="gsDeleteSession({js_session_path}, {js_display_name}, this)">Delete</button>
   </nav>
 </article>
 """.format(
@@ -263,6 +267,8 @@ def _render_index_page(sessions: list[dict]) -> str:
                     hostname=html.escape(hostname),
                     command_count=command_count,
                     session_path=quoted_name,
+                    js_session_path=js_session_path,
+                    js_display_name=js_display_name,
                 )
             )
         cards = "\n".join(card_items)
@@ -401,6 +407,18 @@ body {
   color: #ffffff;
   background: rgba(42, 208, 255, 0.15);
 }
+.danger-link {
+  border-color: rgba(220, 60, 60, 0.55);
+  color: #ffb3b3;
+  background: none;
+  cursor: pointer;
+  font-family: "Consolas", monospace;
+}
+.danger-link:hover {
+  border-color: #ff4444;
+  color: #ffffff;
+  background: rgba(220, 50, 50, 0.22);
+}
 .empty-state {
   text-align: center;
 }
@@ -433,6 +451,22 @@ body {
     __CARDS__
   </section>
 </main>
+<script>
+function gsDeleteSession(sessionPath, displayName, btn) {
+  if (!confirm('Delete session "' + displayName + '"?\\nThis action cannot be undone and will remove all logs and data.')) return;
+  fetch('/api/session/' + sessionPath, {method: 'DELETE'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.deleted !== undefined) {
+        var card = btn.closest('article');
+        if (card) card.remove();
+      } else {
+        alert('Delete failed: ' + (d.error || 'Unknown error'));
+      }
+    })
+    .catch(function() { alert('Delete failed: network error'); });
+}
+</script>
 </body>
 </html>
 """
@@ -496,6 +530,8 @@ def _render_session_page(
 
         discovery_query = urlencode({**filter_params, **discovery_params})
         session_name = quote(session.meta.session_name)
+        js_session_name = json.dumps(session_name)
+        js_display_name = json.dumps(session.meta.session_name)
         preview_count = len(discoveries["timeline"])
         total_discoveries = len(discoveries["notes"]) + len(discoveries["assets"])
 
@@ -526,8 +562,10 @@ a {{ color: #8cc8ff; }}
 .meta-line {{ color: #adc0da; margin-top: 0.6rem; }}
 .layout {{ display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 1rem; align-items: start; }}
 .actions {{ display: flex; gap: 0.6rem; flex-wrap: wrap; margin: 0.9rem 0 1rem; }}
-.action-pill {{ border: 1px solid #36567f; border-radius: 999px; padding: 0.3rem 0.75rem; text-decoration: none; }}
+.action-pill {{ border: 1px solid #36567f; border-radius: 999px; padding: 0.3rem 0.75rem; text-decoration: none; color: #8cc8ff; }}
 .action-pill:hover {{ border-color: #52d0ff; background: #1a2a42; }}
+.action-pill.danger-pill {{ border-color: rgba(220, 60, 60, 0.55); color: #ffb3b3; background: none; cursor: pointer; font-family: "Consolas", "Lucida Console", monospace; font-size: inherit; }}
+.action-pill.danger-pill:hover {{ border-color: #ff4444; color: #ffffff; background: rgba(220, 50, 50, 0.22); }}
 .report-frame {{ width: 100%; height: 760px; border: 1px solid #334b70; background: #fff; border-radius: 8px; }}
 .report-preview {{ background: #0b1020; border: 1px solid #334b70; border-radius: 8px; padding: 1rem; overflow: auto; min-height: 760px; }}
 .discoveries-panel {{ position: sticky; top: 1rem; border: 1px solid #3d608d; border-radius: 12px; background: linear-gradient(160deg, #13243b, #0f1d31); padding: 0.9rem; box-shadow: inset 0 0 0 1px rgba(96, 142, 193, 0.16); }}
@@ -563,6 +601,8 @@ a {{ color: #8cc8ff; }}
             <a class="action-pill" href="/session/{session_name}?{md_query}">Markdown preview</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
+            <button class="action-pill danger-pill" type="button"
+              onclick="gsDeleteSession({js_session_name}, {js_display_name})">Delete Session</button>
         </div>
     </section>
 
@@ -590,6 +630,21 @@ a {{ color: #8cc8ff; }}
         </aside>
     </section>
 </main>
+<script>
+function gsDeleteSession(sessionPath, displayName) {{
+  if (!confirm('Delete session "' + displayName + '"?\\nThis action cannot be undone and will remove all logs and data.')) return;
+  fetch('/api/session/' + sessionPath, {{method: 'DELETE'}})
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (d.deleted !== undefined) {{
+        window.location.href = '/';
+      }} else {{
+        alert('Delete failed: ' + (d.error || 'Unknown error'));
+      }}
+    }})
+    .catch(function() {{ alert('Delete failed: network error'); }});
+}}
+</script>
 </body>
 </html>
 """
@@ -641,6 +696,14 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 if value not in (None, ""):
                     params[key] = [str(value)]
         self._handle_report(session_name, params)
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/session/"):
+            session_name_raw = parsed.path[len("/api/session/"):].strip("/")
+            self._handle_delete_session(session_name_raw)
+            return
+        self._send_json({"error": "Not found"}, status=404)
 
     def log_message(self, format: str, *args) -> None:
         return
@@ -759,6 +822,18 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 discovery_limit,
             )
         )
+
+    def _handle_delete_session(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        try:
+            delete_session(session_name)
+        except FileNotFoundError:
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+        self._send_json({"deleted": session_name})
 
     def _load_filtered_session(self, raw_name: str, params: dict[str, list[str]]) -> LoadedSession:
         session_name = unquote(raw_name)
