@@ -46,6 +46,10 @@ class TestGenerateBashHookScript:
         script = generate_bash_hook_script(tmp_path / ".hook_events.jsonl")
         assert "$PS1" in script
 
+    def test_supports_custom_rec_marker_env(self, tmp_path):
+        script = generate_bash_hook_script(tmp_path / ".hook_events.jsonl")
+        assert "GUILD_SCROLL_REC_MARKER" in script
+
 
 class TestCreateBashRcdir:
     def test_creates_bashrc(self, tmp_path):

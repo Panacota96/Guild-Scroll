@@ -35,6 +35,10 @@ class TestGenerateHookScript:
         script = generate_hook_script(tmp_path / ".hook_events.jsonl", session_name="test-sess")
         assert "$PROMPT" in script
 
+    def test_prompt_supports_custom_rec_marker_env(self, tmp_path):
+        script = generate_hook_script(tmp_path / ".hook_events.jsonl", session_name="test-sess")
+        assert "GUILD_SCROLL_REC_MARKER" in script
+
 
 class TestCreateZdotdir:
     def test_creates_zshrc(self, tmp_path):

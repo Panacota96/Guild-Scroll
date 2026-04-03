@@ -26,7 +26,7 @@ Entry point: `pyproject.toml` → `gscroll = "guild_scroll.cli:cli"`
 
 | Command | Description |
 |---------|-------------|
-| `gscroll start [NAME]` | Start a new recording session |
+| `gscroll start [NAME]` | Start a new recording session with persistent prompt indicator |
 | `gscroll list` | List all recorded sessions |
 | `gscroll status` | Show active session (via `GUILD_SCROLL_SESSION` env var) |
 | `gscroll note [SESSION] TEXT [--tag TAG]` | Add an annotation to a session |

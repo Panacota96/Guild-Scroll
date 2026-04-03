@@ -248,6 +248,9 @@ See [DOCKER.md](DOCKER.md) for full Docker + Kubernetes guide, including trouble
 # Start a new session
 gscroll start htb-machine
 
+# Check active recording status (shows [REC] when active)
+gscroll status
+
 # Add a note (auto-detects active session inside a recording)
 gscroll note "found open port 80 — Apache 2.4" --tag recon
 
@@ -298,6 +301,31 @@ gscroll finalize htb-machine --result compromised
 
 # Update to latest
 gscroll update
+```
+
+### Recording Indicator
+
+`gscroll` keeps a persistent recording indicator in your interactive shell prompt while a session is active.
+It is injected by the shell hook loaded during `gscroll start` and is removed automatically when you exit that recording shell.
+
+1. `gscroll start <name>` launches a wrapped shell with hook injection.
+2. The hook prepends a marker and the session name to your prompt on every command.
+3. Exiting that shell removes the indicator because the hook environment ends with the session.
+
+- Called by: `gscroll start` (via `session.start_session()` and hook generation)
+- Calls: zsh `PROMPT` / bash `PS1` prompt updates in `guild_scroll.hooks`
+- Reads: `GUILD_SCROLL_SESSION`, optional `GUILD_SCROLL_REC_MARKER`
+- Writes: interactive prompt decoration, `gscroll status` output
+
+```bash
+# Default marker
+gscroll start htb-machine
+# prompt shows: [REC] htb-machine ...
+
+# Optional custom marker for theme compatibility
+export GUILD_SCROLL_REC_MARKER="⏺ REC"
+gscroll start htb-machine
+# prompt shows: ⏺ REC htb-machine ...
 ```
 
 ---
