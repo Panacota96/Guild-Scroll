@@ -239,6 +239,8 @@ def _render_index_page(sessions: list[dict]) -> str:
             command_count = _format_command_count(session.get("command_count"))
             quoted_name = quote(name, safe="")
             escaped_name = html.escape(name)
+            js_session_path = json.dumps(quoted_name)
+            js_display_name = json.dumps(name)
             card_items.append(
                 """
 <article class="session-card">
@@ -256,7 +258,7 @@ def _render_index_page(sessions: list[dict]) -> str:
     <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
     <button class="rune-link danger-link" type="button"
-      onclick="gsDeleteSession('{session_path}', '{escaped_name_js}', this)">Delete</button>
+      onclick="gsDeleteSession({js_session_path}, {js_display_name}, this)">Delete</button>
   </nav>
 </article>
 """.format(
@@ -265,7 +267,8 @@ def _render_index_page(sessions: list[dict]) -> str:
                     hostname=html.escape(hostname),
                     command_count=command_count,
                     session_path=quoted_name,
-                    escaped_name_js=name.replace("\\", "\\\\").replace("'", "\\'"),
+                    js_session_path=js_session_path,
+                    js_display_name=js_display_name,
                 )
             )
         cards = "\n".join(card_items)
@@ -527,6 +530,8 @@ def _render_session_page(
 
         discovery_query = urlencode({**filter_params, **discovery_params})
         session_name = quote(session.meta.session_name)
+        js_session_name = json.dumps(session_name)
+        js_display_name = json.dumps(session.meta.session_name)
         preview_count = len(discoveries["timeline"])
         total_discoveries = len(discoveries["notes"]) + len(discoveries["assets"])
 
@@ -597,7 +602,7 @@ a {{ color: #8cc8ff; }}
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
             <button class="action-pill danger-pill" type="button"
-              onclick="gsDeleteSession('{session_name}', '{html.escape(session.meta.session_name, quote=True)}')">Delete Session</button>
+              onclick="gsDeleteSession({js_session_name}, {js_display_name})">Delete Session</button>
         </div>
     </section>
 

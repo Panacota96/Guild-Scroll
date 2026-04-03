@@ -350,11 +350,22 @@ def _read_session_meta(log_file: Path) -> Optional[dict]:
 
 
 def delete_session(session_name: str) -> None:
-    """Permanently delete a session directory and all associated data."""
-    sess_dir = _session_dir(session_name)
-    if not sess_dir.exists():
+    """Permanently delete a session directory and all associated data.
+
+    Validates that the resolved session directory is within the configured
+    sessions root before removing anything.
+    """
+    sessions_dir = get_sessions_dir()
+    sess_dir = sessions_dir / session_name
+    try:
+        resolved_sessions_dir = sessions_dir.resolve()
+        resolved_sess_dir = sess_dir.resolve(strict=False)
+        resolved_sess_dir.relative_to(resolved_sessions_dir)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Invalid session name: {session_name!r}") from exc
+    if not resolved_sess_dir.exists():
         raise FileNotFoundError(f"Session not found: {session_name!r}")
-    shutil.rmtree(str(sess_dir))
+    shutil.rmtree(str(resolved_sess_dir))
 
 
 def get_session_status() -> Optional[dict]:

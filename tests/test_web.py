@@ -581,9 +581,8 @@ class TestDeleteSession:
             hostname="kali",
             command_count=0,
         )
-        import json as _json
         (sess_dir / "logs" / SESSION_LOG_NAME).write_text(
-            _json.dumps(meta.to_dict(), ensure_ascii=False) + "\n",
+            json.dumps(meta.to_dict(), ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
 
@@ -592,4 +591,3 @@ class TestDeleteSession:
 
         assert status == 200
         assert not sess_dir.exists()
-
