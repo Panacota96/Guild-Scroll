@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.8.0] — 2026-04-03
+
+### Added
+
+- **`[REC]` indicator in `gscroll start` output** — the start command now prefixes its status messages with `[REC]` (e.g. `[REC] Starting session 'foo' — type 'exit' or Ctrl-D to stop.`) instead of `[gscroll]`, giving a consistent active-recording signal across the CLI and shell prompt.
+- **`hooks.py` — persistent shell hook module** — new `src/guild_scroll/hooks.py` generates self-contained zsh (`ZDOTDIR`) and bash (`BASH_ENV`) hook scripts that inject `preexec`/`precmd` (zsh) and `PROMPT_COMMAND`/`trap DEBUG` (bash) recording hooks without modifying the user's dotfiles.
+- **Configurable recording marker (`GUILD_SCROLL_REC_MARKER`)** — both the zsh and bash hook templates read `$GUILD_SCROLL_REC_MARKER` at runtime, defaulting to `[REC]`, so operators can customise the prompt prefix to any string.
+
+---
+
 ## [0.7.1] — 2026-04-03
 
 ### Fixed
