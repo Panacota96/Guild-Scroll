@@ -52,6 +52,7 @@ docker-compose exec kali-recorder zsh
 kubectl apply -k k8s/
 kubectl port-forward -n guild-scroll svc/guild-scroll-app 8080:8080
 kubectl exec -it -n guild-scroll kali-recorder-0 -- zsh
+gscroll start htb-machine
 ```
 
 ## Related Docs
