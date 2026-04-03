@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.11.1] — 2026-04-03
+
+### Added
+
+- **Integration tests for `GET /api/sessions`** — new `TestSessionsApi` class validates empty-list response, session enumeration, JSON schema, security headers, and meta field presence.
+- **Integration tests for `GET /api/session/{name}`** — new `TestSessionApi` class validates 200 with full session payload (commands, notes, assets), 404 for missing sessions, 400 for traversal attempts, search/filter query parameters, and security headers.
+- **Integration tests for `GET /api/session/{name}/download`** — new `TestDownload` class validates `Content-Disposition` and content-type for `md` and `html` formats, 400 on missing or invalid format, 404 for missing sessions, traversal rejection, and that exported content includes session name and recorded commands.
+
+### Fixed
+
+- All HTTP handlers already covered `FileNotFoundError`, `ValueError`, and `OSError` — confirmed by the new test suite; no silent connection drops remain.
+
+---
+
 ## [0.11.0] — 2026-04-03
 
 ### Added
