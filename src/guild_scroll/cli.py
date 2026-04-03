@@ -145,7 +145,7 @@ def status():
     if not info:
         click.echo("No active session.")
         return
-    click.echo(f"Active session: {info.get('session_name')}")
+    click.echo(f"[REC] Active session: {info.get('session_name')}")
     click.echo(f"  Started : {info.get('start_time')}")
     click.echo(f"  Commands: {info.get('command_count', 0)}")
 

@@ -64,6 +64,7 @@ class TestStatusCommand:
         result = runner.invoke(cli, ["status"])
         assert result.exit_code == 0
         assert "live-box" in result.output
+        assert "[REC]" in result.output
 
 
 class TestStartCommand:
