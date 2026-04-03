@@ -5,6 +5,7 @@ import re
 import string
 import sys
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
@@ -1185,15 +1186,14 @@ class TestTerminal:
             assert payload["started"] is True
 
             # Write
-            import time as _time
-            _time.sleep(0.3)
+            time.sleep(0.3)
             w_body = json.dumps({"input": "echo hello-guild-scroll\n"}).encode()
             w_status, _, w_resp = _request_post(
                 server, "/api/session/term-full/terminal/write", w_body
             )
             assert w_status == 200
 
-            _time.sleep(0.5)
+            time.sleep(0.5)
 
             # Read
             r_status, _, r_resp = _request(

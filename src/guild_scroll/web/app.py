@@ -1643,6 +1643,15 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 del _active_terminals[session_name]
         log_path = session_dir / "terminal.log"
         master_fd, slave_fd = _pty.openpty()
+        # Spawn zsh with a minimal, controlled environment to avoid env-variable attacks
+        minimal_env = {
+            "TERM": "xterm-256color",
+            "HOME": os.environ.get("HOME", "/tmp"),
+            "USER": os.environ.get("USER", ""),
+            "LOGNAME": os.environ.get("LOGNAME", ""),
+            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            "SHELL": "/bin/zsh",
+        }
         try:
             proc = subprocess.Popen(
                 ["zsh"],
@@ -1651,6 +1660,7 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 stderr=slave_fd,
                 start_new_session=True,
                 close_fds=True,
+                env=minimal_env,
             )
         except FileNotFoundError:
             os.close(master_fd)
@@ -1680,9 +1690,12 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         if info is None:
             self._send_json({"error": "No active terminal for this session"}, status=404)
             return
-        input_bytes = input_text.encode("utf-8", errors="replace")[:_TERMINAL_MAX_INPUT_BYTES]
+        # Encode first, then truncate at a valid UTF-8 boundary to avoid splitting sequences
+        raw_bytes = input_text.encode("utf-8", errors="replace")
+        if len(raw_bytes) > _TERMINAL_MAX_INPUT_BYTES:
+            raw_bytes = raw_bytes[:_TERMINAL_MAX_INPUT_BYTES].decode("utf-8", errors="ignore").encode("utf-8")
         try:
-            os.write(info.master_fd, input_bytes)
+            os.write(info.master_fd, raw_bytes)
         except OSError as exc:
             self._send_json({"error": f"Write failed: {exc}"}, status=500)
             return
@@ -1716,14 +1729,32 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         if info is None:
             self._send_json({"error": "No active terminal"}, status=404)
             return
-        try:
-            os.kill(info.pid, signal.SIGTERM)
-        except OSError:
-            pass
+        # Close master fd first so the reader thread unblocks and exits
         try:
             os.close(info.master_fd)
         except OSError:
             pass
+        # Graceful SIGTERM, then SIGKILL fallback to avoid zombie processes
+        try:
+            os.kill(info.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        for _ in range(10):
+            try:
+                if os.waitpid(info.pid, os.WNOHANG)[0] != 0:
+                    break
+            except OSError:
+                break
+            time.sleep(0.05)
+        else:
+            try:
+                os.kill(info.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                os.waitpid(info.pid, 0)
+            except OSError:
+                pass
         self._send_json({"stopped": True, "session": session_name})
 
     def _load_filtered_session(self, raw_name: str, params: dict[str, list[str]]) -> LoadedSession:
