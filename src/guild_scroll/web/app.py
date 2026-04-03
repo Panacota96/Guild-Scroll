@@ -1690,10 +1690,10 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         if info is None:
             self._send_json({"error": "No active terminal for this session"}, status=404)
             return
-        # Encode first, then truncate at a valid UTF-8 boundary to avoid splitting sequences
+        # Truncate at character level first so multi-byte sequences are never split
+        if len(input_text) * 4 > _TERMINAL_MAX_INPUT_BYTES:
+            input_text = input_text[: _TERMINAL_MAX_INPUT_BYTES // 4]
         raw_bytes = input_text.encode("utf-8", errors="replace")
-        if len(raw_bytes) > _TERMINAL_MAX_INPUT_BYTES:
-            raw_bytes = raw_bytes[:_TERMINAL_MAX_INPUT_BYTES].decode("utf-8", errors="ignore").encode("utf-8")
         try:
             os.write(info.master_fd, raw_bytes)
         except OSError as exc:

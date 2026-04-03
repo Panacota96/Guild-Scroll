@@ -1185,22 +1185,27 @@ class TestTerminal:
             assert status == 200
             assert payload["started"] is True
 
+            # Allow the shell to initialise before sending a command
+            time.sleep(0.4)
+
             # Write
-            time.sleep(0.3)
             w_body = json.dumps({"input": "echo hello-guild-scroll\n"}).encode()
             w_status, _, w_resp = _request_post(
                 server, "/api/session/term-full/terminal/write", w_body
             )
             assert w_status == 200
 
-            time.sleep(0.5)
-
-            # Read
-            r_status, _, r_resp = _request(
-                server, "/api/session/term-full/terminal/read"
-            )
-            r_payload = json.loads(r_resp)
-            assert r_status == 200
+            # Poll for output instead of a fixed sleep to avoid flakiness
+            output_seen = ""
+            for _ in range(20):
+                time.sleep(0.15)
+                r_status, _, r_resp = _request(
+                    server, "/api/session/term-full/terminal/read"
+                )
+                assert r_status == 200
+                output_seen += json.loads(r_resp).get("output", "")
+                if output_seen:
+                    break
 
             # Stop
             s_status, _, s_resp = _request_post(
