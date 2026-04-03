@@ -597,6 +597,7 @@ a {{ color: #8cc8ff; }}
         <h1>Session: {html.escape(session.meta.session_name)}</h1>
         <p class="meta-line">Commands in report: {len(session.commands)} | Preview format: {html.escape(preview_format)}</p>
         <div class="actions">
+            <a class="action-pill back-pill" href="/">&#8592; Back to sessions</a>
             <a class="action-pill" href="/session/{session_name}?{html_query}">HTML preview</a>
             <a class="action-pill" href="/session/{session_name}?{md_query}">Markdown preview</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
