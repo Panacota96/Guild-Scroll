@@ -6,13 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
-## [0.9.0] — 2026-04-03
+## [0.9.1] — 2026-04-03
 
-### Added
+### Fixed
 
-- **Session deletion via web UI** — each session card on the index page now shows a **Delete** button, and the session detail page exposes a **Delete Session** action. Both trigger a browser `confirm()` dialog before permanently removing the session directory and all associated logs, assets, and data via a new `DELETE /api/session/{name}` endpoint.
-- **`delete_session()` in `session.py`** — new public function that removes a session directory tree (`shutil.rmtree`); raises `FileNotFoundError` if the session does not exist.
-- **`DELETE /api/session/{name}` endpoint** — handles `do_DELETE` in `GuildScrollRequestHandler`; validates session name against path-traversal rules, delegates to `delete_session()`, and returns `{"deleted": "<name>"}` on success or a JSON error on failure.
+- **Command output no longer shows "No output captured" for users with modern shell prompts** — `extract_command_outputs` in `output_extractor.py` previously only recognised `%`, `$`, and `#` as prompt terminators, so sessions recorded under Oh My Zsh, Powerlevel10k, Fish, or any theme that uses `❯`, `➜`, `>`, `→`, or `λ` returned an empty output list, causing every command to display "No output captured" in HTML/Markdown exports and the web UI.  The fix extends the recognised terminator set to include those modern characters and adds a content-based fallback for any other unknown prompt format.
 
 ---
 
