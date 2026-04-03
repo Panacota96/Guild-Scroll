@@ -501,28 +501,93 @@ class TestSessionDiscoveryPanel:
         assert older_pos != -1
         assert newest_pos < older_pos
 
-    def test_session_page_has_back_to_sessions_button(self, isolated_sessions_dir):
+
+class TestDeleteSession:
+    def test_delete_removes_session_directory(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()
         sessions_dir.mkdir(parents=True, exist_ok=True)
-        _write_session_records(
-            sessions_dir,
-            "backbtn",
-            [
-                {
-                    "type": "session_meta",
-                    "session_name": "backbtn",
-                    "session_id": "web-test",
-                    "start_time": "2026-04-01T14:00:00Z",
-                    "hostname": "kali",
-                    "command_count": 0,
-                },
-            ],
-        )
+        _make_session(sessions_dir, "to-delete")
+        assert (sessions_dir / "to-delete").exists()
 
         with _running_server() as server:
-            status, _, body = _request(server, "/session/backbtn")
+            status, headers, body = _request(server, "/api/session/to-delete", method="DELETE")
+
+        payload = json.loads(body)
+        assert status == 200
+        assert headers["Content-Type"].startswith("application/json")
+        assert payload["deleted"] == "to-delete"
+        assert not (sessions_dir / "to-delete").exists()
+
+    def test_delete_nonexistent_session_returns_404(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, headers, body = _request(server, "/api/session/ghost-session", method="DELETE")
+
+        payload = json.loads(body)
+        assert status == 404
+        assert headers["Content-Type"].startswith("application/json")
+        assert "not found" in payload["error"].lower()
+
+    def test_delete_traversal_returns_400(self, isolated_sessions_dir):
+        with _running_server() as server:
+            status, headers, body = _request(server, "/api/session/../escape", method="DELETE")
+
+        payload = json.loads(body)
+        assert status == 400
+        assert headers["Content-Type"].startswith("application/json")
+        assert payload["error"] == "Invalid session name."
+
+    def test_index_page_has_delete_button(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "deletable")
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/")
 
         content = body.decode("utf-8")
         assert status == 200
-        assert 'class="action-pill back-pill" href="/"' in content
-        assert "Back to sessions" in content
+        assert "Delete" in content
+        assert "gsDeleteSession" in content
+
+    def test_session_page_has_delete_button(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "del-session")
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/session/del-session")
+
+        content = body.decode("utf-8")
+        assert status == 200
+        assert "Delete Session" in content
+        assert "gsDeleteSession" in content
+
+    def test_delete_also_removes_all_subdirectories(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        sess_dir = sessions_dir / "full-session"
+        for subdir in ("logs", "assets", "screenshots", "parts/2/logs"):
+            (sess_dir / subdir).mkdir(parents=True)
+        from guild_scroll.config import SESSION_LOG_NAME
+        from guild_scroll.log_schema import SessionMeta
+        from guild_scroll.utils import iso_timestamp
+        meta = SessionMeta(
+            session_name="full-session",
+            session_id="web-test",
+            start_time=iso_timestamp(),
+            hostname="kali",
+            command_count=0,
+        )
+        (sess_dir / "logs" / SESSION_LOG_NAME).write_text(
+            json.dumps(meta.to_dict(), ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/api/session/full-session", method="DELETE")
+
+        assert status == 200
+        assert not sess_dir.exists()

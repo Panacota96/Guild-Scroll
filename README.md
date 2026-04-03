@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.8.1-green)
+![Version](https://img.shields.io/badge/version-0.9.1-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -48,7 +48,7 @@ gscroll export --format md   # structured report, ready to share
 | **Verification** | `gscroll verify [SESSION] [--key KEYFILE]` verifies integrity; exits non-zero on mismatch |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
-| **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API |
+| **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API; sessions can be deleted from the index or detail pages via a confirmation-guarded Delete button |
 | **Session auto-detect** | All sub-commands pick up `GUILD_SCROLL_SESSION` automatically |
 | **Self-update** | `gscroll update` checks GitHub and reinstalls |
 
