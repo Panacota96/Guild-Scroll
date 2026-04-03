@@ -43,6 +43,7 @@ services:
       - guild-scroll-net
     stdin_open: true
     tty: true
+    command: ["gscroll", "start", "--", "zsh"]
     restart: unless-stopped
 
 volumes:
