@@ -565,6 +565,34 @@ class TestDeleteSession:
         assert "Delete Session" in content
         assert "gsDeleteSession" in content
 
+    def test_delete_oserror_returns_500(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "oserr-session")
+
+        with patch("guild_scroll.web.app.delete_session", side_effect=OSError("disk full")):
+            with _running_server() as server:
+                status, headers, body = _request(server, "/api/session/oserr-session", method="DELETE")
+
+        payload = json.loads(body)
+        assert status == 500
+        assert headers["Content-Type"].startswith("application/json")
+        assert "disk full" in payload["error"]
+
+    def test_delete_valueerror_returns_400(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "valerr-session")
+
+        with patch("guild_scroll.web.app.delete_session", side_effect=ValueError("bad path")):
+            with _running_server() as server:
+                status, headers, body = _request(server, "/api/session/valerr-session", method="DELETE")
+
+        payload = json.loads(body)
+        assert status == 400
+        assert headers["Content-Type"].startswith("application/json")
+        assert payload["error"] == "Invalid session name."
+
     def test_delete_also_removes_all_subdirectories(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()
         sessions_dir.mkdir(parents=True, exist_ok=True)
