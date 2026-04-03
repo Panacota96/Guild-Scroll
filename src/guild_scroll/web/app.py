@@ -223,11 +223,12 @@ def _format_command_count(value: object) -> int:  # noqa: ANN001
 
 
 def _render_index_page(sessions: list[dict]) -> str:
+    total_count = len(sessions)
     if not sessions:
         cards = (
             '<article class="session-card empty-state">'
             '<h2>No sessions found</h2>'
-            '<p>Start a run with gscroll start to forge your first chronicle.</p>'
+            '<p>Start a run with <code>gscroll start</code> to forge your first chronicle.</p>'
             '</article>'
         )
     else:
@@ -235,6 +236,8 @@ def _render_index_page(sessions: list[dict]) -> str:
         for session in sessions:
             name = str(session.get("session_name") or "unknown")
             start_time = _format_start_time(session.get("start_time"))
+            raw_start = str(session.get("start_time") or "")
+            raw_host = str(session.get("hostname") or "").lower()
             hostname = _format_hostname(session.get("hostname"))
             command_count = _format_command_count(session.get("command_count"))
             quoted_name = quote(name, safe="")
@@ -243,7 +246,8 @@ def _render_index_page(sessions: list[dict]) -> str:
             js_display_name = json.dumps(name)
             card_items.append(
                 """
-<article class="session-card">
+<article class="session-card" data-name="{data_name}" data-start="{data_start}"
+  data-host="{data_host}" data-commands="{command_count}">
   <header class="session-head">
     <h2>{session_name}</h2>
     <span class="glyph">SIGIL</span>
@@ -269,6 +273,9 @@ def _render_index_page(sessions: list[dict]) -> str:
                     session_path=quoted_name,
                     js_session_path=js_session_path,
                     js_display_name=js_display_name,
+                    data_name=html.escape(name.lower()),
+                    data_start=html.escape(raw_start),
+                    data_host=html.escape(raw_host),
                 )
             )
         cards = "\n".join(card_items)
@@ -326,6 +333,82 @@ body {
   color: var(--text-muted);
   font-family: "Consolas", "Lucida Console", monospace;
 }
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  animation: rise 390ms ease-out;
+}
+.search-box {
+  flex: 1 1 220px;
+  position: relative;
+}
+.search-box input {
+  width: 100%;
+  padding: 0.55rem 0.8rem 0.55rem 2.2rem;
+  border: 1px solid rgba(63, 199, 255, 0.42);
+  border-radius: 999px;
+  background: rgba(16, 33, 52, 0.88);
+  color: var(--text-main);
+  font-size: 0.92rem;
+  font-family: "Consolas", "Lucida Console", monospace;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.search-box input:focus {
+  border-color: var(--hover-core);
+  box-shadow: 0 0 12px rgba(42, 208, 255, 0.22);
+}
+.search-box input::placeholder { color: var(--text-muted); }
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  pointer-events: none;
+}
+.sort-select {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid rgba(63, 199, 255, 0.42);
+  border-radius: 999px;
+  background: rgba(16, 33, 52, 0.88);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-family: "Consolas", "Lucida Console", monospace;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 160ms ease;
+}
+.sort-select:focus { border-color: var(--hover-core); }
+.session-count {
+  color: var(--text-muted);
+  font-family: "Consolas", monospace;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.kbd-hint {
+  color: var(--text-muted);
+  font-family: "Consolas", monospace;
+  font-size: 0.72rem;
+  border: 1px solid rgba(158, 178, 199, 0.3);
+  border-radius: 4px;
+  padding: 0.12rem 0.38rem;
+  margin-left: 0.3rem;
+}
+.no-match {
+  text-align: center;
+  grid-column: 1 / -1;
+  padding: 2rem 0;
+  display: none;
+}
+.no-match p {
+  color: var(--text-muted);
+  margin: 0;
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -345,6 +428,7 @@ body {
   border-color: var(--hover-core);
   box-shadow: inset 0 0 0 1px rgba(224, 171, 84, 0.26), 0 0 24px rgba(42, 208, 255, 0.18);
 }
+.session-card.gs-hidden { display: none; }
 .session-head {
   display: flex;
   align-items: baseline;
@@ -434,6 +518,8 @@ body {
   .shell { padding: 1.3rem 0.78rem 1.6rem; }
   .hero h1 { font-size: 1.72rem; }
   .session-meta div { grid-template-columns: 68px 1fr; }
+  .toolbar { gap: 0.4rem; }
+  .kbd-hint { display: none; }
 }
 @keyframes rise {
   from { opacity: 0; transform: translateY(8px); }
@@ -447,8 +533,10 @@ body {
     <h1>Guild Scroll Session Codex</h1>
     <p>Neon runes mark each expedition. Select a chronicle to inspect reports or extract artifacts.</p>
   </section>
-  <section class="grid">
+  __TOOLBAR__
+  <section class="grid" id="session-grid">
     __CARDS__
+    <div class="no-match" id="no-match-msg"><p>No sessions match your search.</p></div>
   </section>
 </main>
 <script>
@@ -459,18 +547,103 @@ function gsDeleteSession(sessionPath, displayName, btn) {
     .then(function(d) {
       if (d.deleted !== undefined) {
         var card = btn.closest('article');
-        if (card) card.remove();
+        if (card) { card.remove(); gsUpdateCount(); }
       } else {
         alert('Delete failed: ' + (d.error || 'Unknown error'));
       }
     })
     .catch(function() { alert('Delete failed: network error'); });
 }
+var searchInput = document.getElementById('gs-search');
+var sortSelect = document.getElementById('gs-sort');
+var countEl = document.getElementById('gs-count');
+var grid = document.getElementById('session-grid');
+var noMatch = document.getElementById('no-match-msg');
+
+function gsUpdateCount() {
+  if (!countEl) return;
+  var cards = grid.querySelectorAll('.session-card:not(.empty-state)');
+  var visible = 0;
+  cards.forEach(function(c) { if (!c.classList.contains('gs-hidden')) visible++; });
+  var total = cards.length;
+  countEl.textContent = visible === total ? total + ' session' + (total !== 1 ? 's' : '')
+    : visible + ' of ' + total + ' session' + (total !== 1 ? 's' : '');
+  if (noMatch) noMatch.style.display = (visible === 0 && total > 0) ? 'block' : 'none';
+}
+
+function gsFilter() {
+  if (!searchInput) return;
+  var query = searchInput.value.toLowerCase().trim();
+  var cards = grid.querySelectorAll('.session-card:not(.empty-state)');
+  cards.forEach(function(card) {
+    var name = card.getAttribute('data-name') || '';
+    var host = card.getAttribute('data-host') || '';
+    var match = !query || name.indexOf(query) !== -1 || host.indexOf(query) !== -1;
+    card.classList.toggle('gs-hidden', !match);
+  });
+  gsUpdateCount();
+}
+
+function gsSort() {
+  if (!sortSelect || !grid) return;
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.session-card:not(.empty-state)'));
+  var mode = sortSelect.value;
+  cards.sort(function(a, b) {
+    switch(mode) {
+      case 'date-desc':
+        return (b.getAttribute('data-start') || '').localeCompare(a.getAttribute('data-start') || '');
+      case 'date-asc':
+        return (a.getAttribute('data-start') || '').localeCompare(b.getAttribute('data-start') || '');
+      case 'name-asc':
+        return (a.getAttribute('data-name') || '').localeCompare(b.getAttribute('data-name') || '');
+      case 'name-desc':
+        return (b.getAttribute('data-name') || '').localeCompare(a.getAttribute('data-name') || '');
+      case 'commands-desc':
+        return (parseInt(b.getAttribute('data-commands'),10)||0) - (parseInt(a.getAttribute('data-commands'),10)||0);
+      default:
+        return 0;
+    }
+  });
+  cards.forEach(function(card) { grid.appendChild(card); });
+}
+
+if (searchInput) searchInput.addEventListener('input', gsFilter);
+if (sortSelect) sortSelect.addEventListener('change', gsSort);
+document.addEventListener('keydown', function(e) {
+  if (e.key === '/' && document.activeElement !== searchInput
+      && document.activeElement.tagName !== 'INPUT'
+      && document.activeElement.tagName !== 'TEXTAREA'
+      && document.activeElement.tagName !== 'SELECT') {
+    e.preventDefault();
+    if (searchInput) searchInput.focus();
+  }
+});
+gsUpdateCount();
 </script>
 </body>
 </html>
 """
-    return template.replace("__CARDS__", cards, 1)
+    toolbar = ""
+    if total_count > 0:
+        toolbar = (
+            '<div class="toolbar">'
+            '<div class="search-box">'
+            '<span class="search-icon" aria-hidden="true">&#x1F50D;</span>'
+            '<input type="search" id="gs-search" placeholder="Search sessions by name or host…"'
+            ' aria-label="Search sessions">'
+            '</div>'
+            '<select id="gs-sort" class="sort-select" aria-label="Sort sessions">'
+            '<option value="date-desc">Newest first</option>'
+            '<option value="date-asc">Oldest first</option>'
+            '<option value="name-asc">Name A–Z</option>'
+            '<option value="name-desc">Name Z–A</option>'
+            '<option value="commands-desc">Most commands</option>'
+            '</select>'
+            '<span class="session-count" id="gs-count"></span>'
+            '<span class="kbd-hint" title="Press / to search">/</span>'
+            '</div>'
+        )
+    return template.replace("__TOOLBAR__", toolbar, 1).replace("__CARDS__", cards, 1)
 
 
 def _render_session_page(

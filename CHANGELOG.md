@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.10.0] — 2026-04-03
+
+### Added
+
+- **Dashboard search bar** — the index page now includes a search input that instantly filters session cards by name or hostname as you type, with a `🔍` icon and accessible `aria-label`.
+- **Dashboard sort controls** — a dropdown lets users sort sessions by date (newest/oldest first), name (A–Z / Z–A), or command count (most commands first). Default remains newest-first.
+- **Session count indicator** — displays the total number of sessions (e.g. "5 sessions") and updates to show filtered counts (e.g. "2 of 5 sessions") when searching.
+- **Keyboard shortcut `/`** — pressing `/` anywhere on the index page focuses the search bar, matching the convention used by GitHub and other developer tools.
+- **No-match message** — when a search query produces zero results, a "No sessions match your search" message is shown instead of a blank grid.
+- **Data attributes on session cards** — each card carries `data-name`, `data-start`, `data-host`, and `data-commands` attributes enabling client-side filtering and sorting without server round-trips.
+
+---
+
 ## [0.9.1] — 2026-04-03
 
 ### Fixed

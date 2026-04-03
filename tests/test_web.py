@@ -291,6 +291,108 @@ class TestIndexPage:
         content = _render_index_page([])
         assert "@media (max-width: 700px)" in content
 
+    def test_page_has_search_bar_when_sessions_exist(self):
+        content = _render_index_page(
+            [{"session_name": "s1", "start_time": "2026-04-01T00:00:00Z", "hostname": "h", "command_count": 1}]
+        )
+        assert 'id="gs-search"' in content
+        assert 'type="search"' in content
+        assert 'aria-label="Search sessions"' in content
+        assert "search-box" in content
+
+    def test_page_has_sort_select_when_sessions_exist(self):
+        content = _render_index_page(
+            [{"session_name": "s1", "start_time": "2026-04-01T00:00:00Z", "hostname": "h", "command_count": 1}]
+        )
+        assert 'id="gs-sort"' in content
+        assert "sort-select" in content
+        assert 'aria-label="Sort sessions"' in content
+        assert "date-desc" in content
+        assert "date-asc" in content
+        assert "name-asc" in content
+        assert "name-desc" in content
+        assert "commands-desc" in content
+
+    def test_page_has_session_count_element(self):
+        content = _render_index_page(
+            [{"session_name": "s1", "start_time": "2026-04-01T00:00:00Z", "hostname": "h", "command_count": 1}]
+        )
+        assert 'id="gs-count"' in content
+        assert "session-count" in content
+
+    def test_page_has_keyboard_shortcut_hint(self):
+        content = _render_index_page(
+            [{"session_name": "s1", "start_time": "2026-04-01T00:00:00Z", "hostname": "h", "command_count": 1}]
+        )
+        assert "kbd-hint" in content
+
+    def test_page_omits_toolbar_when_empty(self):
+        content = _render_index_page([])
+        assert 'id="gs-search"' not in content
+        assert 'id="gs-sort"' not in content
+        assert 'class="toolbar"' not in content
+
+    def test_cards_have_data_attributes_for_filtering(self):
+        content = _render_index_page(
+            [
+                {
+                    "session_name": "Alpha-Run",
+                    "start_time": "2026-04-01T10:00:00Z",
+                    "hostname": "forge-01",
+                    "command_count": 5,
+                }
+            ]
+        )
+        assert 'data-name="alpha-run"' in content
+        assert 'data-start="2026-04-01T10:00:00Z"' in content
+        assert 'data-host="forge-01"' in content
+        assert 'data-commands="5"' in content
+
+    def test_data_attributes_escape_special_characters(self):
+        content = _render_index_page(
+            [
+                {
+                    "session_name": 'x"><img src=x>',
+                    "start_time": "2026-04-01T00:00:00Z",
+                    "hostname": "host",
+                    "command_count": 0,
+                }
+            ]
+        )
+        assert 'x"><img src=x>' not in content
+        assert "data-name=" in content
+
+    def test_page_has_no_match_message(self):
+        content = _render_index_page(
+            [{"session_name": "s1", "start_time": "2026-04-01T00:00:00Z", "hostname": "h", "command_count": 1}]
+        )
+        assert "no-match" in content
+        assert "No sessions match your search" in content
+
+    def test_page_has_client_side_filter_and_sort_js(self):
+        content = _render_index_page(
+            [{"session_name": "s1", "start_time": "2026-04-01T00:00:00Z", "hostname": "h", "command_count": 1}]
+        )
+        assert "gsFilter" in content
+        assert "gsSort" in content
+        assert "gsUpdateCount" in content
+
+    def test_search_sort_toolbar_via_live_server(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _write_session_meta(sessions_dir, "alpha", start_time="2026-04-01T10:00:00Z", command_count=3)
+        _write_session_meta(sessions_dir, "beta", start_time="2026-04-02T10:00:00Z", command_count=7)
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/")
+
+        content = body.decode("utf-8")
+        assert status == 200
+        assert 'id="gs-search"' in content
+        assert 'id="gs-sort"' in content
+        assert 'data-name="alpha"' in content
+        assert 'data-name="beta"' in content
+
 
 class TestDiscoveriesApi:
     def test_returns_notes_and_assets_newest_first(self, isolated_sessions_dir):
