@@ -110,10 +110,13 @@ class TestIsSafeSessionName:
 
 
 class TestCreateServer:
-    def test_non_localhost_bind_is_allowed(self):
+    def test_non_localhost_bind_is_allowed(self, capsys):
         server = create_server(host="0.0.0.0", port=0)
         try:
             assert server is not None
+            out = capsys.readouterr().out
+            assert "WARNING" in out
+            assert "0.0.0.0" in out
         finally:
             server.server_close()
 
