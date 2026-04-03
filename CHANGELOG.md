@@ -6,6 +6,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.11.0] — 2026-04-03
+
+### Added
+
+- **Drag & Drop asset upload** — session detail pages now feature a drag-and-drop upload zone (in the sidebar). Users can drop PNG, JPEG, GIF, WEBP, SVG, or PDF files (up to 10 MB) and see inline previews immediately after upload.
+- **`POST /api/session/{name}/upload`** — new HTTP endpoint that accepts `multipart/form-data` uploads, validates file type by both extension and magic bytes, and stores files in `{session}/assets/uploads/`.
+- **`GET /api/session/{name}/asset/{filename}`** — new endpoint to serve previously uploaded asset files directly from the browser.
+- **Session heartbeat** — the session detail page now auto-pings the server every 30 seconds; a live/expired badge reflects liveness. Heartbeats expire after 90 s of silence.
+- **`POST /api/session/{name}/heartbeat`** — record a heartbeat for a session.
+- **`GET /api/session/{name}/heartbeat`** — query `live`, `expired`, or `unknown` status for a session.
+- **Session creation from web view** — the dashboard toolbar now includes a "+ New Session" button that prompts for a name, calls `POST /api/sessions`, and redirects to the new session page.
+- **`POST /api/sessions`** — creates a lightweight session (directory + `session.jsonl` meta record) without requiring a live terminal; name is sanitised server-side.
+- **Integrated zsh terminal launcher** — the session detail page contains a "Open Terminal" button that spawns a PTY-backed `zsh` process tied to the session. All output is recorded to `terminal.log` inside the session directory. The embedded text-area interface supports typing and sending commands, with 500 ms output polling.
+- **`POST /api/session/{name}/terminal/start`** — spawn a `zsh` PTY for a session.
+- **`POST /api/session/{name}/terminal/write`** — send input bytes to the running terminal.
+- **`GET /api/session/{name}/terminal/read`** — poll buffered output and liveness.
+- **`POST /api/session/{name}/terminal/stop`** — terminate the terminal and flush the log.
+
+### Changed
+
+- Session detail page header now shows a coloured heartbeat status badge (⚡ LIVE / ✖ EXPIRED / ● UNKNOWN).
+- Index page toolbar has a "+ New Session" button alongside search/sort controls.
+
+---
+
 ## [0.10.0] — 2026-04-03
 
 ### Added
