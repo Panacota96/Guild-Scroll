@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.9.0] — 2026-04-03
+
+### Added
+
+- **Session deletion via web UI** — each session card on the index page now shows a **Delete** button, and the session detail page exposes a **Delete Session** action. Both trigger a browser `confirm()` dialog before permanently removing the session directory and all associated logs, assets, and data via a new `DELETE /api/session/{name}` endpoint.
+- **`delete_session()` in `session.py`** — new public function that removes a session directory tree (`shutil.rmtree`); raises `FileNotFoundError` if the session does not exist.
+- **`DELETE /api/session/{name}` endpoint** — handles `do_DELETE` in `GuildScrollRequestHandler`; validates session name against path-traversal rules, delegates to `delete_session()`, and returns `{"deleted": "<name>"}` on success or a JSON error on failure.
+
+---
+
 ## [0.8.0] — 2026-04-03
 
 ### Added
