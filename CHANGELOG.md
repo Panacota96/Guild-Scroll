@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.8.1] — 2026-04-03
+
+### Added
+
+- **Return button in session view** — the session detail page now shows a "← Back to sessions" pill button in the header, linking back to the session list (`/`). This eliminates the need to use the browser's back button for in-app navigation.
+
+---
+
 ## [0.8.0] — 2026-04-03
 
 ### Added

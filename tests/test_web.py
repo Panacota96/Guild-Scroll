@@ -500,3 +500,29 @@ class TestSessionDiscoveryPanel:
         assert newest_pos != -1
         assert older_pos != -1
         assert newest_pos < older_pos
+
+    def test_session_page_has_back_to_sessions_button(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _write_session_records(
+            sessions_dir,
+            "backbtn",
+            [
+                {
+                    "type": "session_meta",
+                    "session_name": "backbtn",
+                    "session_id": "web-test",
+                    "start_time": "2026-04-01T14:00:00Z",
+                    "hostname": "kali",
+                    "command_count": 0,
+                },
+            ],
+        )
+
+        with _running_server() as server:
+            status, _, body = _request(server, "/session/backbtn")
+
+        content = body.decode("utf-8")
+        assert status == 200
+        assert 'class="action-pill back-pill" href="/"' in content
+        assert "Back to sessions" in content

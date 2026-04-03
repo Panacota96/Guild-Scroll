@@ -528,6 +528,8 @@ a {{ color: #8cc8ff; }}
 .actions {{ display: flex; gap: 0.6rem; flex-wrap: wrap; margin: 0.9rem 0 1rem; }}
 .action-pill {{ border: 1px solid #36567f; border-radius: 999px; padding: 0.3rem 0.75rem; text-decoration: none; }}
 .action-pill:hover {{ border-color: #52d0ff; background: #1a2a42; }}
+.back-pill {{ border-color: #2e4261; color: #adc0da; }}
+.back-pill:hover {{ border-color: #8cc8ff; color: #e9efff; }}
 .report-frame {{ width: 100%; height: 760px; border: 1px solid #334b70; background: #fff; border-radius: 8px; }}
 .report-preview {{ background: #0b1020; border: 1px solid #334b70; border-radius: 8px; padding: 1rem; overflow: auto; min-height: 760px; }}
 .discoveries-panel {{ position: sticky; top: 1rem; border: 1px solid #3d608d; border-radius: 12px; background: linear-gradient(160deg, #13243b, #0f1d31); padding: 0.9rem; box-shadow: inset 0 0 0 1px rgba(96, 142, 193, 0.16); }}
@@ -559,6 +561,7 @@ a {{ color: #8cc8ff; }}
         <h1>Session: {html.escape(session.meta.session_name)}</h1>
         <p class="meta-line">Commands in report: {len(session.commands)} | Preview format: {html.escape(preview_format)}</p>
         <div class="actions">
+            <a class="action-pill back-pill" href="/">&#8592; Back to sessions</a>
             <a class="action-pill" href="/session/{session_name}?{html_query}">HTML preview</a>
             <a class="action-pill" href="/session/{session_name}?{md_query}">Markdown preview</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
