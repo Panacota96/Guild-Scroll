@@ -171,6 +171,106 @@ graph LR
 
 ---
 
+## CLI Command Overview
+
+Every `gscroll` sub-command and its key options at a glance.
+
+```mermaid
+mindmap
+  root((gscroll))
+    start
+      NAME
+      --mode ctf | assessment
+    list
+    status
+    note
+      SESSION
+      TEXT
+      --tag TAG
+    export
+      SESSION
+      --format md | html | cast
+      --writeup
+      -o PATH
+    search
+      SESSION
+      --tool TOOL
+      --phase PHASE
+      --exit-code CODE
+      --cwd DIR
+      --output-contains TEXT
+    replay
+      SESSION
+      --speed FLOAT
+    validate
+      SESSION
+      --repair
+    sign
+      SESSION
+      --key KEYFILE
+    verify
+      SESSION
+      --key KEYFILE
+    finalize
+      SESSION
+      --result rooted | compromised | partial | failed | incomplete
+    tui
+      SESSION
+    serve
+      --host HOST
+      --port PORT
+      --tls-cert FILE
+      --tls-key FILE
+    update
+```
+
+---
+
+## Session Lifecycle State Machine
+
+The states a session moves through from `gscroll start` to archival.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active : gscroll start
+    Active --> Active : command logged\nnote added\nasset captured
+    Active --> Validated : gscroll validate
+    Validated --> Active : --repair applied
+    Active --> Finalized : gscroll finalize
+    Finalized --> Signed : gscroll sign
+    Signed --> Verified : gscroll verify ✅
+    Signed --> Tampered : gscroll verify ❌
+    Active --> Exported : gscroll export
+    Finalized --> Exported : gscroll export
+    Signed --> Exported : gscroll export
+    Active --> Replayed : gscroll replay
+    Finalized --> Encrypted : AES-256-GCM\nauto on finalize v0.13+
+    Encrypted --> Exported : transparent decrypt
+```
+
+---
+
+## Export Pipeline
+
+How `session.jsonl` and raw I/O logs are transformed into each output format.
+
+```mermaid
+flowchart LR
+    jsonl["session.jsonl\nJSONL events"] --> loader["session_loader.py\nLoadedSession"]
+    raw["raw_io.log\nRaw terminal I/O"] --> loader
+    loader --> enrich["Enrichment\nasset_detector + tool_tagger"]
+    enrich --> md_exp["markdown.py\n→ report.md / writeup.md"]
+    enrich --> html_exp["html.py\n→ self-contained report.html"]
+    enrich --> cast_exp["cast.py\n→ session.cast\nasciicast v2"]
+    enrich --> obs_exp["obsidian.py\n→ vault note"]
+    enrich --> tui_exp["tui/\n→ Textual dashboard"]
+    enrich --> web_exp["web/\n→ localhost viewer & API"]
+```
+
+> **Full diagram reference:** [docs/diagrams.md](docs/diagrams.md) — includes the JSONL data model, security and integrity flow, module dependency map, and all the above diagrams with additional detail.
+
+---
+
 ## Installation
 
 Guild Scroll runs in three ways — pick the one that matches your setup:
@@ -514,6 +614,7 @@ graph TD
 | `tests/` | Pytest suite covering CLI flows, schema compatibility, exporters, merge logic, hooks, and validation |
 | `docs/context-engineering/` | Project-specific design notes for tool/agent workflows; includes [process-diagrams.md](docs/context-engineering/process-diagrams.md) |
 | `docs/security/` | Security reviews (CVE research, Bandit findings) |
+| `docs/diagrams.md` | Full Mermaid diagram reference (architecture, data model, security, modules) |
 | `.github/instructions/` | Shared contributor rules for Python, CLI implementation, and release prep |
 | `.github/skills/` | Reusable workflows such as `/issue` and `/release` |
 
