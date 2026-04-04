@@ -486,6 +486,8 @@ graph TD
 | `.github/instructions/` | Shared contributor rules for Python, CLI implementation, and release prep |
 | `.github/skills/` | Reusable workflows such as `/issue` and `/release` |
 
+For a full directory tree, per-module descriptions, Mermaid component graphs, and notes to guide diagram and wireframe work, see [docs/context-engineering/project-structure.md](docs/context-engineering/project-structure.md).
+
 ### How the Python Package Is Organized
 
 - `cli.py` is the entrypoint and keeps command imports lazy so optional features do not slow startup or create circular imports.
@@ -714,11 +716,12 @@ Contributions, bug reports, and feature requests are welcome.
 - Quick project overview: `CLAUDE.md`
 - Shared repository rules: `.github/copilot-instructions.md`
 - Auto-loaded implementation guidance: `.github/instructions/`
+- Project structure and component map: [docs/context-engineering/project-structure.md](docs/context-engineering/project-structure.md)
 - Design/context notes: `docs/context-engineering/`
 - Deployment mode docs: `docs/docker/` and `DOCKER.md`
 
 **High-value documentation issues:**
-- Architecture deep-dive for the recording pipeline, JSONL schema, and multi-session merge flow
+- ~~Architecture deep-dive for the recording pipeline, JSONL schema, and multi-session merge flow~~ — see [docs/context-engineering/project-structure.md](docs/context-engineering/project-structure.md)
 - Infrastructure/release guide covering version sync, changelog expectations, and contributor release workflow
 - Exporter extension guide for adding or maintaining output formats
 - Testing guide for fixtures, CLI coverage patterns, and integration-style session tests
