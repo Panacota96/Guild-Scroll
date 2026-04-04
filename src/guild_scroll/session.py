@@ -23,6 +23,7 @@ from guild_scroll.config import (
 )
 from guild_scroll.hooks import create_hook_dir, detect_shell
 from guild_scroll.integrity import generate_session_key, load_session_key
+from guild_scroll.crypto import generate_encryption_key, load_encryption_key, encrypt_file
 from guild_scroll.log_schema import SessionMeta, CommandEvent, AssetEvent
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.recorder import start_recording
@@ -125,6 +126,7 @@ def start_session(raw_name: str, join: bool = False, mode: Optional[str] = None)
     )
     final_log = logs_dir / SESSION_LOG_NAME
     hmac_key = generate_session_key(sess_dir)
+    generate_encryption_key(sess_dir)
     with JSONLWriter(final_log, hmac_key=hmac_key) as writer:
         writer.write(meta.to_dict())
 
@@ -285,8 +287,16 @@ def finalize_session(
         writer.close()
         _patch_session_meta(final_log, iso_timestamp(), command_count)
 
-        # Assessment mode: auto-sign and enforce permissions
+        # Encrypt sensitive log files at rest
         sess_root = _session_root_from_logs_dir(logs_dir, part)
+        enc_key = load_encryption_key(sess_root)
+        if enc_key is not None:
+            encrypt_file(final_log, enc_key)
+            raw_io_path = logs_dir / RAW_IO_LOG_NAME
+            if raw_io_path.exists():
+                encrypt_file(raw_io_path, enc_key)
+
+        # Assessment mode: auto-sign and enforce permissions
         if mode is None:
             mode = _read_session_mode(sess_root)
         if mode == "assessment":
@@ -320,7 +330,8 @@ def _get_finalize_lock(log_path: Path) -> threading.Lock:
 def _read_command_count(log_path: Path) -> int:
     if not log_path.exists():
         return 0
-    for line in log_path.read_text(encoding="utf-8").splitlines():
+    from guild_scroll.crypto import read_plaintext
+    for line in read_plaintext(log_path).splitlines():
         line = line.strip()
         if not line:
             continue
@@ -336,8 +347,9 @@ def _read_command_count(log_path: Path) -> int:
 def _count_command_records(log_path: Path) -> int:
     if not log_path.exists():
         return 0
+    from guild_scroll.crypto import read_plaintext
     count = 0
-    for line in log_path.read_text(encoding="utf-8").splitlines():
+    for line in read_plaintext(log_path).splitlines():
         line = line.strip()
         if not line:
             continue
@@ -402,7 +414,9 @@ def list_sessions() -> list[dict]:
 
 def _read_session_meta(log_file: Path) -> Optional[dict]:
     try:
-        for line in log_file.read_text(encoding="utf-8").splitlines():
+        from guild_scroll.crypto import read_plaintext
+        content = read_plaintext(log_file)
+        for line in content.splitlines():
             line = line.strip()
             if not line:
                 continue

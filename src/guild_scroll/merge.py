@@ -19,8 +19,9 @@ def _write_output_log(log_path: Path, output: str) -> None:
 
 
 def _validate_merged_log(log_path: Path, expected_command_count: int) -> None:
+    from guild_scroll.crypto import read_plaintext
     command_count = 0
-    for line_number, line in enumerate(log_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(read_plaintext(log_path).splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
@@ -69,9 +70,10 @@ def merge_parts(session_name: str) -> LoadedSession:
     final_log = sess_dir / "logs" / SESSION_LOG_NAME
 
     # Read existing lines to preserve session_meta
-    existing_lines = final_log.read_text(encoding="utf-8").splitlines() if final_log.exists() else []
+    from guild_scroll.crypto import read_plaintext, load_encryption_key, encrypt_file
+    existing_content = read_plaintext(final_log) if final_log.exists() else ""
     meta_line: str = ""
-    for line in existing_lines:
+    for line in existing_content.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -115,6 +117,10 @@ def merge_parts(session_name: str) -> LoadedSession:
         _validate_merged_log(temp_log, len(session.commands))
         temp_log.replace(final_log)
         _validate_merged_log(final_log, len(session.commands))
+        # Re-encrypt if session uses at-rest encryption
+        enc_key = load_encryption_key(sess_dir)
+        if enc_key is not None:
+            encrypt_file(final_log, enc_key)
     except Exception:
         if temp_log.exists():
             temp_log.unlink(missing_ok=True)

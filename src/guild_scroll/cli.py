@@ -198,6 +198,7 @@ def note(text, session_name, tags):
     from guild_scroll.log_schema import NoteEvent
     from guild_scroll.log_writer import JSONLWriter
     from guild_scroll.integrity import load_session_key
+    from guild_scroll.crypto import is_encrypted, load_encryption_key, decrypt_file_bytes, encrypt_data
     from guild_scroll.utils import iso_timestamp
     from guild_scroll.config import SESSION_LOG_NAME
 
@@ -214,8 +215,23 @@ def note(text, session_name, tags):
         tags=list(tags),
     )
     hmac_key = load_session_key(sess_dir)
-    with JSONLWriter(log_file, hmac_key=hmac_key) as writer:
-        writer.write(event.to_dict())
+    enc_key = load_encryption_key(sess_dir)
+
+    if enc_key is not None and is_encrypted(log_file):
+        # Decrypt → append → re-encrypt
+        import json as _json
+        from guild_scroll.integrity import compute_event_hmac, should_sign
+        record = event.to_dict()
+        if hmac_key is not None and should_sign(record):
+            record = dict(record)
+            record["event_hmac"] = compute_event_hmac(hmac_key, record)
+        plaintext = decrypt_file_bytes(log_file, enc_key).decode("utf-8")
+        new_line = _json.dumps(record, ensure_ascii=False)
+        combined = plaintext.rstrip("\n") + "\n" + new_line + "\n"
+        log_file.write_bytes(encrypt_data(enc_key, combined.encode("utf-8")))
+    else:
+        with JSONLWriter(log_file, hmac_key=hmac_key) as writer:
+            writer.write(event.to_dict())
     click.echo(f"[gscroll] Note added to session '{sess_dir.name}'.")
 
 
@@ -736,9 +752,11 @@ def finalize(session_name, result):
         click.echo(f"Error: Session log not found for '{sess_dir.name}'.", err=True)
         sys.exit(1)
 
+    from guild_scroll.crypto import read_plaintext, is_encrypted, load_encryption_key, encrypt_data
+    content = read_plaintext(log_path)
     rewritten: list[str] = []
     found_meta = False
-    for line in log_path.read_text(encoding="utf-8").splitlines():
+    for line in content.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
@@ -758,7 +776,15 @@ def finalize(session_name, result):
         click.echo(f"Error: No session_meta record found in '{sess_dir.name}'.", err=True)
         sys.exit(1)
 
-    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    new_content = "\n".join(rewritten) + "\n"
+    if is_encrypted(log_path):
+        enc_key = load_encryption_key(sess_dir)
+        if enc_key is not None:
+            log_path.write_bytes(encrypt_data(enc_key, new_content.encode("utf-8")))
+        else:
+            log_path.write_text(new_content, encoding="utf-8")
+    else:
+        log_path.write_text(new_content, encoding="utf-8")
     result_str = f" (result: {result})" if result else ""
     click.echo(f"[gscroll] Session '{sess_dir.name}' finalized{result_str}.")
 
