@@ -2,13 +2,14 @@ import errno
 import json
 import random
 import re
+import ssl
 import string
 import sys
 import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -189,6 +190,114 @@ class TestCreateServer:
                 path = f"/api/session/{quote(raw, safe='')}"
                 status, _, _ = _request(server, path)
                 assert status in {400, 404}
+
+    def test_tls_minimum_version_is_tls_1_2(self, tmp_path):
+        cert_file = tmp_path / "cert.pem"
+        key_file = tmp_path / "key.pem"
+        cert_file.write_bytes(b"CERT")
+        key_file.write_bytes(b"KEY")
+
+        mock_ctx = MagicMock()
+        mock_ctx.wrap_socket.return_value = MagicMock()
+
+        with patch("ssl.SSLContext", return_value=mock_ctx):
+            server = create_server(
+                port=0,
+                tls_certfile=str(cert_file),
+                tls_keyfile=str(key_file),
+            )
+            server.server_close()
+
+        assert mock_ctx.minimum_version == ssl.TLSVersion.TLSv1_2
+
+    def test_tls_loads_cert_chain(self, tmp_path):
+        cert_file = tmp_path / "cert.pem"
+        key_file = tmp_path / "key.pem"
+        cert_file.write_bytes(b"CERT")
+        key_file.write_bytes(b"KEY")
+
+        mock_ctx = MagicMock()
+        mock_ctx.wrap_socket.return_value = MagicMock()
+
+        with patch("ssl.SSLContext", return_value=mock_ctx):
+            server = create_server(
+                port=0,
+                tls_certfile=str(cert_file),
+                tls_keyfile=str(key_file),
+            )
+            server.server_close()
+
+        mock_ctx.load_cert_chain.assert_called_once_with(
+            certfile=str(cert_file),
+            keyfile=str(key_file),
+        )
+
+    def test_tls_enforces_forward_secret_ciphers(self, tmp_path):
+        cert_file = tmp_path / "cert.pem"
+        key_file = tmp_path / "key.pem"
+        cert_file.write_bytes(b"CERT")
+        key_file.write_bytes(b"KEY")
+
+        mock_ctx = MagicMock()
+        mock_ctx.wrap_socket.return_value = MagicMock()
+
+        with patch("ssl.SSLContext", return_value=mock_ctx):
+            server = create_server(
+                port=0,
+                tls_certfile=str(cert_file),
+                tls_keyfile=str(key_file),
+            )
+            server.server_close()
+
+        call_args = mock_ctx.set_ciphers.call_args
+        assert call_args is not None, "set_ciphers was not called"
+        cipher_string = call_args[0][0]
+        assert "ECDHE" in cipher_string
+        assert "!aNULL" in cipher_string
+        assert "!RC4" in cipher_string
+
+    def test_tls_context_protocol_is_tls_server(self, tmp_path):
+        cert_file = tmp_path / "cert.pem"
+        key_file = tmp_path / "key.pem"
+        cert_file.write_bytes(b"CERT")
+        key_file.write_bytes(b"KEY")
+
+        mock_ctx = MagicMock()
+        mock_ctx.wrap_socket.return_value = MagicMock()
+
+        with patch("ssl.SSLContext", return_value=mock_ctx) as mock_ssl_cls:
+            server = create_server(
+                port=0,
+                tls_certfile=str(cert_file),
+                tls_keyfile=str(key_file),
+            )
+            server.server_close()
+
+        mock_ssl_cls.assert_called_once_with(ssl.PROTOCOL_TLS_SERVER)
+
+    def test_non_localhost_bind_with_tls_prints_confirmation(self, capsys):
+        mock_ctx = MagicMock()
+        mock_ctx.wrap_socket.return_value = MagicMock()
+
+        with patch("ssl.SSLContext", return_value=mock_ctx):
+            server = create_server(
+                host="0.0.0.0",
+                port=0,
+                tls_certfile="/tmp/cert.pem",
+                tls_keyfile="/tmp/key.pem",
+            )
+            server.server_close()
+
+        out = capsys.readouterr().out
+        assert "WARNING" not in out
+        assert "TLS enabled" in out
+
+    def test_no_tls_context_created_without_cert_files(self):
+        with patch("ssl.SSLContext") as mock_ssl_cls:
+            server = create_server(port=0)
+            server.server_close()
+
+        mock_ssl_cls.assert_not_called()
 
 
 class TestServeCommand:
