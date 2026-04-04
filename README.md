@@ -56,6 +56,9 @@ gscroll export --format md   # structured report, ready to share
 
 ## Architecture
 
+<!-- visual: architecture-overview | last-updated: v0.13.0 (2026-04) | update-when: module structure or layer boundaries change -->
+The three layers interact as follows: the **Shell & Recorder** layer captures raw I/O and structured events, the **Core** layer loads and enriches session data, and the **Surfaces** layer exposes that data through the CLI, exporters, TUI, web viewer, and replay tools.
+
 ```mermaid
 graph LR
     subgraph "Shell & Recorder"
@@ -100,6 +103,9 @@ graph LR
 
 ## Session Data Flow
 
+<!-- visual: session-data-flow | last-updated: v0.13.0 (2026-04) | update-when: recording pipeline or hook API changes -->
+This sequence diagram traces a single working session from `gscroll start` through command execution to final export, showing how each participant hands off to the next.
+
 ```mermaid
 sequenceDiagram
     participant U as User
@@ -131,6 +137,9 @@ sequenceDiagram
 
 ## Recording Lifecycle
 
+<!-- visual: recording-lifecycle | last-updated: v0.13.0 (2026-04) | update-when: session start/finalize/export pipeline changes -->
+The flowchart below traces a session from creation through enrichment, signing, and at-rest encryption to the final output surfaces (exports, TUI, web, replay).
+
 ```mermaid
 flowchart TD
     start([Start session]) --> hook[Inject shell hook\nset GUILD_SCROLL_SESSION]
@@ -148,6 +157,7 @@ flowchart TD
 
 ## Multi-Session Flow *(M4)*
 
+<!-- visual: multi-session-flow | last-updated: v0.13.0 (2026-04) | update-when: gscroll join / multi-part merge logic changes -->
 For scenarios with multiple concurrent terminals (e.g. attacker shell + reverse shell listener):
 
 ```mermaid
@@ -403,6 +413,20 @@ Both formats include:
 | **Remediation** | Short-, medium-, and long-term priorities |
 | **Appendix** | Notes and captured command output evidence |
 
+<!-- visual: export-workflow | last-updated: v0.13.0 (2026-04) | update-when: exporter list or --writeup flag logic changes -->
+The diagram below shows how a loaded session flows through each exporter. The `--writeup` flag activates additional structured sections in the Markdown and HTML outputs.
+
+```mermaid
+flowchart LR
+    session[("session.jsonl\nraw_io.log")] --> loader["session_loader.py\nLoadedSession"]
+    loader --> md["markdown.py\n→ report.md"]
+    loader --> html["html.py\n→ report.html"]
+    loader --> cast["cast.py\n→ session.cast"]
+    loader --> obs["obsidian.py\n→ vault note"]
+    md -->|"--writeup"| writeup["Structured writeup\nCPTS-style sections"]
+    html -->|"--writeup"| writeuphtml["Self-contained HTML\nwriteup"]
+```
+
 ---
 
 ## Finalize Workflow
@@ -424,7 +448,9 @@ Once finalized, the `finalized: true` and `result` fields are persisted in the s
 
 Valid result values: `rooted`, `compromised`, `partial`, `failed`, `incomplete`.
 
+---
 
+## Technical Stack
 
 | Area | Implementation |
 |---|---|
@@ -442,6 +468,9 @@ Valid result values: `rooted`, `compromised`, `partial`, `failed`, `incomplete`.
 ## Codebase Guide
 
 ### Repository Map
+
+<!-- visual: repository-map | last-updated: v0.13.0 (2026-04) | update-when: new top-level modules or major directory changes -->
+The diagram below maps the repository's top-level structure to its logical layers. Follow the arrows from the repo root to see which directories own the core runtime, exporters, user interfaces, tests, and documentation.
 
 ```mermaid
 graph TD
@@ -604,7 +633,20 @@ gscroll serve --host 0.0.0.0 --tls-cert cert.pem --tls-key key.pem
 
 ## Session Integrity (HMAC-SHA256)
 
+<!-- visual: integrity-key-hierarchy | last-updated: v0.13.0 (2026-04) | update-when: key layout, signing, or encryption logic changes -->
 Guild Scroll provides cryptographic tamper-evidence for event logs using HMAC-SHA256 (stdlib only).
+
+The diagram below shows how the two per-session key files protect session data at the event level (HMAC) and at the storage level (AES-256-GCM):
+
+```mermaid
+flowchart LR
+    key["session.key\n32-byte HMAC key\n(0o600)"] -->|"signs each event"| event["CommandEvent\nNoteEvent\nAssetEvent\n→ event_hmac field"]
+    event --> jsonl[("session.jsonl")]
+    enckey["session.enc_key\n32-byte AES-256 key\n(0o600)"] -->|"encrypts on finalize"| jsonl
+    enckey -->|"encrypts on finalize"| raw[("raw_io.log")]
+    jsonl --> validate["gscroll validate\nHMAC recompute\n+ permission check"]
+    validate -->|"gscroll sign"| sig["session.sig\nchain-of-trust signature"]
+```
 
 ### How it works
 
@@ -716,6 +758,7 @@ Contributions, bug reports, and feature requests are welcome.
 - Auto-loaded implementation guidance: `.github/instructions/`
 - Design/context notes: `docs/context-engineering/`
 - Deployment mode docs: `docs/docker/` and `DOCKER.md`
+- Visual maintenance guide: `docs/visuals-maintenance.md`
 
 **High-value documentation issues:**
 - Architecture deep-dive for the recording pipeline, JSONL schema, and multi-session merge flow
