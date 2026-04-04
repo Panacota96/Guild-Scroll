@@ -13,6 +13,19 @@ _REPLACE = b'[REPLAY]'
 _DELTA = len(_REPLACE) - len(_SEARCH)  # 3
 
 
+def _read_raw_io(raw_io_path: Path) -> bytes:
+    """Return the plaintext bytes of *raw_io_path*, decrypting when needed."""
+    from guild_scroll.crypto import is_encrypted, decrypt_file_bytes, find_session_root_from_log, load_encryption_key
+
+    if not is_encrypted(raw_io_path):
+        return raw_io_path.read_bytes()
+    sess_root = find_session_root_from_log(raw_io_path)
+    key = load_encryption_key(sess_root)
+    if key is None:
+        return raw_io_path.read_bytes()
+    return decrypt_file_bytes(raw_io_path, key)
+
+
 def prepare_replay_logs(
     raw_io_path: Path,
     timing_path: Path,
@@ -21,10 +34,11 @@ def prepare_replay_logs(
     Create temp copies of raw_io and timing logs with [REC] → [REPLAY].
 
     Byte counts in the timing file are updated to reflect the size change.
+    Transparently decrypts raw_io.log when it was encrypted at rest.
     Returns (temp_raw_io, temp_timing, temp_dir).
     Caller must remove temp_dir when done.
     """
-    raw_data = raw_io_path.read_bytes()
+    raw_data = _read_raw_io(raw_io_path)
     new_raw_data = raw_data.replace(_SEARCH, _REPLACE)
 
     new_timing_lines: list[str] = []

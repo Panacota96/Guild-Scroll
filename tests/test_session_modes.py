@@ -172,7 +172,8 @@ class TestStartCommandMode:
         log_file = sessions_dir / "test-session" / "logs" / SESSION_LOG_NAME
         assert log_file.exists()
 
-        for line in log_file.read_text().splitlines():
+        from guild_scroll.crypto import read_plaintext
+        for line in read_plaintext(log_file).splitlines():
             record = json.loads(line.strip())
             if record.get("type") == "session_meta":
                 assert record["mode"] == "assessment"
@@ -189,7 +190,8 @@ class TestStartCommandMode:
 
         sessions_dir = get_sessions_dir()
         log_file = sessions_dir / "test-session" / "logs" / SESSION_LOG_NAME
-        for line in log_file.read_text().splitlines():
+        from guild_scroll.crypto import read_plaintext
+        for line in read_plaintext(log_file).splitlines():
             record = json.loads(line.strip())
             if record.get("type") == "session_meta":
                 assert record["mode"] == "ctf"

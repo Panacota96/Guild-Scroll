@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.13.0] — 2026-04-04
+
+### Security
+
+- **AES-256-GCM at-rest encryption for session data** — every session now generates a dedicated 256-bit encryption key (`session.enc_key`, mode `0o600`) at start time. When a session is finalized, `logs/session.jsonl` and `logs/raw_io.log` are encrypted in place using AES-256-GCM (authenticated encryption with a random 12-byte nonce per write).
+- **Transparent decryption** — all session readers (`gscroll list`, `gscroll export`, `gscroll search`, `gscroll validate`, `gscroll replay`, `gscroll tui`) decrypt transparently; no user action required.
+- **Post-finalization note support** — `gscroll note` performs a decrypt-append-re-encrypt cycle when adding notes to an already-finalized (encrypted) session.
+- **`gscroll finalize` encryption-aware rewrite** — the finalize command preserves the encryption envelope when updating session metadata.
+- **Backward compatibility** — sessions created before v0.13.0 (without `session.enc_key`) are still loaded and displayed without modification.
+
+### Added
+
+- New `src/guild_scroll/crypto.py` module with AES-256-GCM helpers: `generate_encryption_key`, `load_encryption_key`, `encrypt_data`, `decrypt_data`, `encrypt_file`, `decrypt_file_bytes`, `is_encrypted`, `find_session_root_from_log`, `read_plaintext`.
+- `ENC_KEY_NAME = "session.enc_key"` constant in `config.py`.
+- 33 new tests in `tests/test_crypto.py` covering key management, encrypt/decrypt round-trips, file-level helpers, path utilities, and finalize/load/list integration.
+
+### Changed
+
+- `pyproject.toml` — added `cryptography>=46.0.5` as a core dependency (required for AES-256-GCM; no pure-stdlib alternative exists).
+
+---
+
 ## [0.12.1] — 2026-04-04
 
 ### Security

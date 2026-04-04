@@ -33,6 +33,9 @@ RAW_IO_LOG_NAME = "raw_io.log"
 HOOK_EVENTS_NAME = ".hook_events.jsonl"
 SESSION_LOG_NAME = "session.jsonl"
 
+# Encryption key file (AES-256, stored with 0o600 permissions)
+ENC_KEY_NAME = "session.enc_key"
+
 # Multi-session parts directory
 PARTS_DIR_NAME = "parts"
 

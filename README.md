@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.12.1-green)
+![Version](https://img.shields.io/badge/version-0.13.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -467,6 +467,24 @@ Override the base path with `GUILD_SCROLL_DIR`.
 
 Guild Scroll supports two session security modes: **CTF** (default) and **Assessment**.
 
+### At-Rest Encryption
+
+Every session automatically generates a dedicated 256-bit AES encryption key (`session.enc_key`, permissions `0o600`). When a session is finalized, sensitive log files are encrypted with **AES-256-GCM**:
+
+| File | Encrypted |
+|------|-----------|
+| `logs/session.jsonl` | ✅ AES-256-GCM |
+| `logs/raw_io.log` | ✅ AES-256-GCM |
+| `logs/timing.log` | — (timing data only) |
+
+Encryption is **transparent** — all `gscroll` commands (export, search, validate, replay, TUI) decrypt on demand. Sessions created before v0.13.0 without an encryption key are read as-is.
+
+The key hierarchy per session:
+- **`session.key`** — 32-byte HMAC key for per-event integrity signatures
+- **`session.enc_key`** — 32-byte AES-256 key for at-rest encryption (new in v0.13.0)
+
+Both key files carry `0o600` permissions.
+
 ### CTF Mode (default)
 
 Flexible security suitable for CTF competitions and practice:
@@ -475,6 +493,7 @@ Flexible security suitable for CTF competitions and practice:
 - Unsigned legacy events are accepted during validation
 - Standard file permissions
 - Session signing is optional
+- **At-rest encryption** for session data (v0.13.0+)
 
 ```bash
 gscroll start htb-machine                # CTF mode (default)
@@ -489,6 +508,7 @@ Strict security for professional penetration testing engagements:
 - **Strict permissions** — session directories are set to `0o700` (owner-only), key files to `0o600`
 - **Auto-signing** — session is automatically signed (`logs/session.sig`) when finalized
 - **Validation enforcement** — `gscroll validate` checks permissions, signing, and requires all events be HMAC-signed
+- **At-rest encryption** for session data (v0.13.0+)
 
 ```bash
 gscroll start client-pentest --mode assessment

@@ -45,8 +45,14 @@ def _parse_jsonl(log_path: Path, sess_dir: Path, report: ValidationReport) -> li
         report.errors.append(f"missing log file: {_relative_to_session(sess_dir, log_path)}")
         return []
 
+    from guild_scroll.crypto import read_plaintext
+    try:
+        content = read_plaintext(log_path)
+    except Exception:
+        content = log_path.read_text(encoding="utf-8")
+
     records: list[dict] = []
-    for line_number, line in enumerate(log_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(content.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
@@ -323,8 +329,10 @@ def repair_session(sess_dir: Path) -> ValidationReport:
         return report
 
     log_path = sess_dir / "logs" / SESSION_LOG_NAME
+    from guild_scroll.crypto import read_plaintext, is_encrypted, load_encryption_key, encrypt_data
+    content = read_plaintext(log_path)
     rewritten: list[str] = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
+    for line in content.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
@@ -340,6 +348,14 @@ def repair_session(sess_dir: Path) -> ValidationReport:
             )
         rewritten.append(json.dumps(record, ensure_ascii=False))
 
-    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    new_content = "\n".join(rewritten) + "\n"
+    if is_encrypted(log_path):
+        enc_key = load_encryption_key(sess_dir)
+        if enc_key is not None:
+            log_path.write_bytes(encrypt_data(enc_key, new_content.encode("utf-8")))
+        else:
+            log_path.write_text(new_content, encoding="utf-8")
+    else:
+        log_path.write_text(new_content, encoding="utf-8")
     report.repaired.extend(updated_fields)
     return report
