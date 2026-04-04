@@ -59,12 +59,19 @@ def _detect_operator() -> Optional[str]:
 
 
 def start_session(raw_name: str, join: bool = False, mode: Optional[str] = None) -> None:
-    """
-    Create the session directory tree, inject hooks, launch script, finalize.
-    Blocks until the user types `exit` or Ctrl-D.
+    """Create the session directory tree, inject hooks, launch script, finalize.
 
-    If join=True, attach to an existing session as a new numbered part.
-    mode: 'ctf' (default) or 'assessment' — assessment enforces strict security.
+    Blocks until the user types ``exit`` or Ctrl-D.
+
+    Parameters
+    ----------
+    raw_name:
+        User-supplied session name (will be sanitized).
+    join:
+        If *True*, attach to an existing session as a new numbered part.
+    mode:
+        ``'ctf'`` (default) or ``'assessment'``.  Assessment mode enforces
+        strict file permissions and mandatory HMAC integrity.
     """
     if mode is None:
         mode = get_default_mode()
@@ -213,9 +220,7 @@ def _read_session_mode(sess_dir: Path) -> Optional[str]:
     """Read the mode from session metadata, return None if not set."""
     log_file = sess_dir / "logs" / SESSION_LOG_NAME
     meta = _read_session_meta(log_file)
-    if meta:
-        return meta.get("mode")
-    return None
+    return meta.get("mode") if meta else None
 
 
 def finalize_session(
@@ -288,8 +293,10 @@ def finalize_session(
             try:
                 from guild_scroll.signer import sign_session
                 sign_session(sess_root)
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "assessment auto-sign failed: %s", exc
+                )
             _enforce_file_permissions(final_log)
 
         # Clean up intermediate hook events
