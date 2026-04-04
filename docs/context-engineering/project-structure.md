@@ -147,7 +147,7 @@ Guild-Scroll/
 
 - **`search.py`** — Implements `SearchFilter` with predicates for tool name,
   phase, exit code, working directory, and output content. Consumed by `cli.py`
-  and `server.py`.
+  and `web/app.py`.
 
 ### Security & Integrity Layer
 
@@ -176,7 +176,7 @@ output path.
   tables, captured output, notes, and an assets appendix.
 
 - **`exporters/html.py`** — Produces self-contained HTML (inline CSS) with
-  colour-coded phase badges and collapsible command output.
+  color-coded phase badges and collapsible command output.
 
 - **`exporters/cast.py`** — Produces asciicast v2 `.cast` files by pairing
   `raw_io.log` chunks with `timing.log` offsets.
@@ -380,7 +380,7 @@ diagrams:
   exporters.
 
 **Layer 4 — Output Surfaces** (rightmost)
-- Four exporters produce file artefacts (`md`, `html`, `cast`, Obsidian).
+- Four exporters produce file artifacts (`md`, `html`, `cast`, Obsidian).
 - `web/app.py` serves the same data as a live JSON API.
 - `tui/app.py` renders it interactively in the terminal.
 - `replay.py` feeds the raw I/O directly to `scriptreplay`.
