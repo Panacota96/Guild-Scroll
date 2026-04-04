@@ -13,7 +13,7 @@
 
 Guild Scroll wraps your terminal with `script` and zsh hooks to capture every command, output, and asset into structured JSONL logs — so you can replay, search, export, and report without manual note-taking.
 
-[Installation](#installation) · [Quick Start](#quick-start) · [Deployment Modes](docs/docker/deployment-modes.md) · [Codebase Guide](#codebase-guide) · [Diagrams](docs/diagrams.md) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Installation](#installation) · [Quick Start](#quick-start) · [Deployment Modes](docs/docker/deployment-modes.md) · [Process Diagrams](docs/context-engineering/process-diagrams.md) · [Codebase Guide](#codebase-guide) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 </div>
 
@@ -55,6 +55,9 @@ gscroll export --format md   # structured report, ready to share
 ---
 
 ## Architecture
+
+<!-- visual: architecture-overview | last-updated: v0.13.0 (2026-04) | update-when: module structure or layer boundaries change -->
+The three layers interact as follows: the **Shell & Recorder** layer captures raw I/O and structured events, the **Core** layer loads and enriches session data, and the **Surfaces** layer exposes that data through the CLI, exporters, TUI, web viewer, and replay tools.
 
 ```mermaid
 graph LR
@@ -100,6 +103,9 @@ graph LR
 
 ## Session Data Flow
 
+<!-- visual: session-data-flow | last-updated: v0.13.0 (2026-04) | update-when: recording pipeline or hook API changes -->
+This sequence diagram traces a single working session from `gscroll start` through command execution to final export, showing how each participant hands off to the next.
+
 ```mermaid
 sequenceDiagram
     participant U as User
@@ -131,6 +137,9 @@ sequenceDiagram
 
 ## Recording Lifecycle
 
+<!-- visual: recording-lifecycle | last-updated: v0.13.0 (2026-04) | update-when: session start/finalize/export pipeline changes -->
+The flowchart below traces a session from creation through enrichment, signing, and at-rest encryption to the final output surfaces (exports, TUI, web, replay).
+
 ```mermaid
 flowchart TD
     start([Start session]) --> hook[Inject shell hook\nset GUILD_SCROLL_SESSION]
@@ -148,6 +157,7 @@ flowchart TD
 
 ## Multi-Session Flow *(M4)*
 
+<!-- visual: multi-session-flow | last-updated: v0.13.0 (2026-04) | update-when: gscroll join / multi-part merge logic changes -->
 For scenarios with multiple concurrent terminals (e.g. attacker shell + reverse shell listener):
 
 ```mermaid
@@ -476,6 +486,8 @@ gscroll start htb-machine
 4. `gscroll note` appends a `NoteEvent` to the log at any point.
 5. `gscroll export` loads all events, auto-tags each command by security phase, and renders the chosen format.
 
+> Detailed process diagrams for the export pipeline, encryption lifecycle, integrity chain, web server routing, and security modes are in [docs/context-engineering/process-diagrams.md](docs/context-engineering/process-diagrams.md).
+
 ---
 
 ## Writeup Workflow
@@ -503,6 +515,20 @@ Both formats include:
 | **Remediation** | Short-, medium-, and long-term priorities |
 | **Appendix** | Notes and captured command output evidence |
 
+<!-- visual: export-workflow | last-updated: v0.13.0 (2026-04) | update-when: exporter list or --writeup flag logic changes -->
+The diagram below shows how a loaded session flows through each exporter. The `--writeup` flag activates additional structured sections in the Markdown and HTML outputs.
+
+```mermaid
+flowchart LR
+    session[("session.jsonl\nraw_io.log")] --> loader["session_loader.py\nLoadedSession"]
+    loader --> md["markdown.py\n→ report.md"]
+    loader --> html["html.py\n→ report.html"]
+    loader --> cast["cast.py\n→ session.cast"]
+    loader --> obs["obsidian.py\n→ vault note"]
+    md -->|"--writeup"| writeup["Structured writeup\nCPTS-style sections"]
+    html -->|"--writeup"| writeuphtml["Self-contained HTML\nwriteup"]
+```
+
 ---
 
 ## Finalize Workflow
@@ -524,7 +550,9 @@ Once finalized, the `finalized: true` and `result` fields are persisted in the s
 
 Valid result values: `rooted`, `compromised`, `partial`, `failed`, `incomplete`.
 
+---
 
+## Technical Stack
 
 | Area | Implementation |
 |---|---|
@@ -542,6 +570,9 @@ Valid result values: `rooted`, `compromised`, `partial`, `failed`, `incomplete`.
 ## Codebase Guide
 
 ### Repository Map
+
+<!-- visual: repository-map | last-updated: v0.13.0 (2026-04) | update-when: new top-level modules or major directory changes -->
+The diagram below maps the repository's top-level structure to its logical layers. Follow the arrows from the repo root to see which directories own the core runtime, exporters, user interfaces, tests, and documentation.
 
 ```mermaid
 graph TD
@@ -581,11 +612,13 @@ graph TD
 | `src/guild_scroll/tui/` | Optional Textual dashboard components |
 | `src/guild_scroll/web.py` + `src/guild_scroll/web/` | Local preview server and related web helpers |
 | `tests/` | Pytest suite covering CLI flows, schema compatibility, exporters, merge logic, hooks, and validation |
-| `docs/context-engineering/` | Project-specific design notes for tool/agent workflows |
+| `docs/context-engineering/` | Project-specific design notes for tool/agent workflows; includes [process-diagrams.md](docs/context-engineering/process-diagrams.md) |
 | `docs/security/` | Security reviews (CVE research, Bandit findings) |
 | `docs/diagrams.md` | Full Mermaid diagram reference (architecture, data model, security, modules) |
 | `.github/instructions/` | Shared contributor rules for Python, CLI implementation, and release prep |
 | `.github/skills/` | Reusable workflows such as `/issue` and `/release` |
+
+For a full directory tree, per-module descriptions, Mermaid component graphs, and notes to guide diagram and wireframe work, see [docs/context-engineering/project-structure.md](docs/context-engineering/project-structure.md).
 
 ### How the Python Package Is Organized
 
@@ -701,11 +734,26 @@ gscroll serve --tls-cert cert.pem --tls-key key.pem
 gscroll serve --host 0.0.0.0 --tls-cert cert.pem --tls-key key.pem
 ```
 
+> See the [CTF vs Assessment mode decision tree](docs/context-engineering/process-diagrams.md#ctf-vs-assessment-mode-decision-tree) and [encryption lifecycle diagram](docs/context-engineering/process-diagrams.md#encryption-lifecycle) for a visual walk-through.
+
 ---
 
 ## Session Integrity (HMAC-SHA256)
 
+<!-- visual: integrity-key-hierarchy | last-updated: v0.13.0 (2026-04) | update-when: key layout, signing, or encryption logic changes -->
 Guild Scroll provides cryptographic tamper-evidence for event logs using HMAC-SHA256 (stdlib only).
+
+The diagram below shows how the two per-session key files protect session data at the event level (HMAC) and at the storage level (AES-256-GCM):
+
+```mermaid
+flowchart LR
+    key["session.key\n32-byte HMAC key\n(0o600)"] -->|"signs each event"| event["CommandEvent\nNoteEvent\nAssetEvent\n→ event_hmac field"]
+    event --> jsonl[("session.jsonl")]
+    enckey["session.enc_key\n32-byte AES-256 key\n(0o600)"] -->|"encrypts on finalize"| jsonl
+    enckey -->|"encrypts on finalize"| raw[("raw_io.log")]
+    jsonl --> validate["gscroll validate\nHMAC recompute\n+ permission check"]
+    validate -->|"gscroll sign"| sig["session.sig\nchain-of-trust signature"]
+```
 
 ### How it works
 
@@ -732,6 +780,8 @@ The validator loads `session.key`, recomputes the expected digest for every sign
 ### Backward compatibility
 
 Sessions created before 0.7.0 do not have a `session.key` file and will validate cleanly — HMAC checks are skipped when the key file is absent. If events carry an `event_hmac` field but the key file is missing, the validator emits a **warning** rather than an error.
+
+> See the [session integrity chain diagram](docs/context-engineering/process-diagrams.md#session-integrity-chain) for a visual walk-through of the sign → validate → verify flow.
 
 ---
 
@@ -815,11 +865,13 @@ Contributions, bug reports, and feature requests are welcome.
 - Quick project overview: `CLAUDE.md`
 - Shared repository rules: `.github/copilot-instructions.md`
 - Auto-loaded implementation guidance: `.github/instructions/`
+- Project structure and component map: [docs/context-engineering/project-structure.md](docs/context-engineering/project-structure.md)
 - Design/context notes: `docs/context-engineering/`
 - Deployment mode docs: `docs/docker/` and `DOCKER.md`
+- Visual maintenance guide: `docs/visuals-maintenance.md`
 
 **High-value documentation issues:**
-- Architecture deep-dive for the recording pipeline, JSONL schema, and multi-session merge flow
+- ~~Architecture deep-dive for the recording pipeline, JSONL schema, and multi-session merge flow~~ — see [docs/context-engineering/project-structure.md](docs/context-engineering/project-structure.md)
 - Infrastructure/release guide covering version sync, changelog expectations, and contributor release workflow
 - Exporter extension guide for adding or maintaining output formats
 - Testing guide for fixtures, CLI coverage patterns, and integration-style session tests
