@@ -116,7 +116,7 @@ def encrypt_file(path: Path, key: bytes) -> None:
     if not path.exists():
         return
     plaintext = path.read_bytes()
-    if plaintext[: len(_MAGIC)] == _MAGIC:
+    if len(plaintext) >= len(_MAGIC) and plaintext[: len(_MAGIC)] == _MAGIC:
         return  # already encrypted
     path.write_bytes(encrypt_data(key, plaintext))
     try:
@@ -132,7 +132,7 @@ def decrypt_file_bytes(path: Path, key: bytes) -> bytes:
     start with the encryption header (backward-compatible with plaintext files).
     """
     data = path.read_bytes()
-    if data[: len(_MAGIC)] != _MAGIC:
+    if len(data) < len(_MAGIC) or data[: len(_MAGIC)] != _MAGIC:
         return data  # not encrypted — return as-is
     return decrypt_data(key, data)
 
