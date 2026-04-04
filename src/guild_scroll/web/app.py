@@ -1843,6 +1843,12 @@ def create_server(
         import ssl
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        # Restrict TLS 1.2 cipher suites to those providing forward secrecy.
+        # TLS 1.3 suites are always strong and managed separately by the ssl module.
+        ctx.set_ciphers(
+            "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20"
+            ":!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP"
+        )
         ctx.load_cert_chain(certfile=tls_certfile, keyfile=tls_keyfile)
         server.socket = ctx.wrap_socket(server.socket, server_side=True)
     return server

@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.12.1] — 2026-04-04
+
+### Security
+
+- **TLS cipher suite hardening for `gscroll serve`** — the TLS context now restricts TLS 1.2 cipher suites to forward-secret suites (`ECDHE+AESGCM`, `ECDHE+CHACHA20`, `DHE+AESGCM`, `DHE+CHACHA20`) and explicitly excludes weak/null ciphers (`!aNULL`, `!eNULL`, `!EXPORT`, `!DES`, `!RC4`, `!MD5`, `!PSK`, `!SRP`). TLS 1.3 suite selection is handled securely by the stdlib ssl module.
+- **TLS configuration tests** — added six focused tests in `TestCreateServer` to verify: minimum protocol version (TLS 1.2), correct protocol constant (`PROTOCOL_TLS_SERVER`), cert-chain loading, cipher suite enforcement, TLS confirmation message for non-loopback binds, and that no SSL context is created for plain HTTP servers.
+
+---
+
 ## [0.12.0] — 2026-04-03
 
 ### Added
