@@ -57,22 +57,43 @@ gscroll export --format md   # structured report, ready to share
 ## Architecture
 
 ```mermaid
-graph TD
-    A["gscroll start"] -->|"launches script + injects zsh hooks"| B["script process\n(raw_io.log + timing.log)"]
-    A --> C["JSONL log\n(session.jsonl)"]
-
-    subgraph "Per-command (zsh preexec/precmd)"
-        D["CommandEvent"] --> C
-        E["AssetEvent"] --> C
-        F["NoteEvent"] --> C
+graph LR
+    subgraph "Shell & Recorder"
+        start["gscroll start"] --> hooks["Hook injector\n(zsh/bash preexec/precmd)"]
+        hooks --> script["script process\nraw_io.log + timing.log"]
+        hooks --> events["Event stream\nsession.jsonl"]
     end
 
-    B --> G["gscroll replay\n(scriptreplay)"]
-    C --> H["session_loader.py\n(LoadedSession)"]
-    H --> I["gscroll export\n(md / html / cast)"]
-    H --> J["gscroll search\n(SearchFilter)"]
-    H --> K["gscroll tui\n(Textual TUI)"]
-    H --> L["gscroll writeup\n(Claude SDK — M5)"]
+    subgraph "Core"
+        loader["session_loader.py\nLoadedSession + indexes"]
+        schema["log_schema.py\nJSONL event types"]
+        enrich["asset_detector.py + tool_tagger.py\nauto-label + detect assets"]
+        integrity["validator.py + integrity.py\nHMAC, encryption, signing"]
+    end
+
+    events --> loader
+    schema --> loader
+    loader --> enrich
+    enrich --> loader
+    loader --> integrity
+
+    subgraph "Surfaces"
+        cli["cli.py\nClick commands"]
+        exporters["exporters/\nmd | html | cast | obsidian"]
+        tui["tui/\nTextual dashboard"]
+        web["web.py + web/\nlocal viewer + API"]
+        replay["replay.py\nscriptreplay wrapper"]
+        sharing["sharing.py\narchive + uploads"]
+        updater["updater.py\nself-update"]
+    end
+
+    loader --> exporters
+    loader --> tui
+    loader --> web
+    loader --> replay
+    loader --> sharing
+    loader --> updater
+    cli --> start
 ```
 
 ---
@@ -104,6 +125,23 @@ sequenceDiagram
     U->>G: gscroll export --format md
     G->>L: read all events
     G-->>U: session_report.md
+```
+
+---
+
+## Recording Lifecycle
+
+```mermaid
+flowchart TD
+    start([Start session]) --> hook[Inject shell hook\nset GUILD_SCROLL_SESSION]
+    hook --> record[Record raw terminal I/O\nscript -> raw_io.log + timing.log]
+    hook --> events[Write session_meta + per-command events\nsession.jsonl]
+    events --> enrich[Enrich events\nasset detection + tool tagging]
+    enrich --> secure[Validate, sign, encrypt on finalize\nsession.sig + enc files]
+    record --> load[Load session\nsession_loader.py]
+    secure --> load
+    load --> surfaces[[Exports / Search / Replay / TUI / Web]]
+    surfaces --> outputs([Reports, downloads, API responses])
 ```
 
 ---
@@ -402,6 +440,37 @@ Valid result values: `rooted`, `compromised`, `partial`, `failed`, `incomplete`.
 ---
 
 ## Codebase Guide
+
+### Repository Map
+
+```mermaid
+graph TD
+    repo["Guild Scroll repo"] --> core["Core runtime\nsrc/guild_scroll/"]
+    core --> cli["cli.py\nClick entry + command wiring"]
+    core --> record["session.py / recorder.py / hooks.py\nstart/finalize + hook injection"]
+    core --> model["log_schema.py / log_writer.py\nJSONL event model + writers"]
+    core --> enrich["analysis.py / search.py / asset_detector.py / tool_tagger.py\nmetadata + tagging"]
+    core --> integrity["validator.py / integrity.py / merge.py\nHMAC, repair, join parts"]
+    core --> services["server.py / platform_detect.py / updater.py\nsupporting services"]
+
+    repo --> exporters["Exporters\nsrc/guild_scroll/exporters/"]
+    exporters --> md["markdown.py\nreports + writeup"]
+    exporters --> html["html.py\nself-contained preview"]
+    exporters --> cast["cast.py\nasciicast v2"]
+    exporters --> obs["obsidian.py\nvault-friendly export"]
+
+    repo --> ui["User interfaces"]
+    ui --> tui["tui/\nTextual dashboard"]
+    ui --> webui["web.py + web/\nlocal viewer + API"]
+    ui --> sharing["sharing.py\narchive + uploads"]
+
+    repo --> tests["tests/\npytest suite"]
+    tests --> cli_tests["CLI + hooks"]
+    tests --> web_tests["Web/TUI/export integration"]
+
+    repo --> docs["docs/\ncontext-engineering, docker, security"]
+    repo --> github[".github/\ncontributor instructions + skills"]
+```
 
 ### Repository Layout
 
