@@ -13,7 +13,7 @@
 
 Guild Scroll wraps your terminal with `script` and zsh hooks to capture every command, output, and asset into structured JSONL logs — so you can replay, search, export, and report without manual note-taking.
 
-[Installation](#installation) · [Quick Start](#quick-start) · [Deployment Modes](docs/docker/deployment-modes.md) · [Codebase Guide](#codebase-guide) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Installation](#installation) · [Quick Start](#quick-start) · [Deployment Modes](docs/docker/deployment-modes.md) · [Process Diagrams](docs/context-engineering/process-diagrams.md) · [Codebase Guide](#codebase-guide) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 </div>
 
@@ -376,6 +376,8 @@ gscroll start htb-machine
 4. `gscroll note` appends a `NoteEvent` to the log at any point.
 5. `gscroll export` loads all events, auto-tags each command by security phase, and renders the chosen format.
 
+> Detailed process diagrams for the export pipeline, encryption lifecycle, integrity chain, web server routing, and security modes are in [docs/context-engineering/process-diagrams.md](docs/context-engineering/process-diagrams.md).
+
 ---
 
 ## Writeup Workflow
@@ -481,7 +483,7 @@ graph TD
 | `src/guild_scroll/tui/` | Optional Textual dashboard components |
 | `src/guild_scroll/web.py` + `src/guild_scroll/web/` | Local preview server and related web helpers |
 | `tests/` | Pytest suite covering CLI flows, schema compatibility, exporters, merge logic, hooks, and validation |
-| `docs/context-engineering/` | Project-specific design notes for tool/agent workflows |
+| `docs/context-engineering/` | Project-specific design notes for tool/agent workflows; includes [process-diagrams.md](docs/context-engineering/process-diagrams.md) |
 | `docs/security/` | Security reviews (CVE research, Bandit findings) |
 | `.github/instructions/` | Shared contributor rules for Python, CLI implementation, and release prep |
 | `.github/skills/` | Reusable workflows such as `/issue` and `/release` |
@@ -600,6 +602,8 @@ gscroll serve --tls-cert cert.pem --tls-key key.pem
 gscroll serve --host 0.0.0.0 --tls-cert cert.pem --tls-key key.pem
 ```
 
+> See the [CTF vs Assessment mode decision tree](docs/context-engineering/process-diagrams.md#ctf-vs-assessment-mode-decision-tree) and [encryption lifecycle diagram](docs/context-engineering/process-diagrams.md#encryption-lifecycle) for a visual walk-through.
+
 ---
 
 ## Session Integrity (HMAC-SHA256)
@@ -631,6 +635,8 @@ The validator loads `session.key`, recomputes the expected digest for every sign
 ### Backward compatibility
 
 Sessions created before 0.7.0 do not have a `session.key` file and will validate cleanly — HMAC checks are skipped when the key file is absent. If events carry an `event_hmac` field but the key file is missing, the validator emits a **warning** rather than an error.
+
+> See the [session integrity chain diagram](docs/context-engineering/process-diagrams.md#session-integrity-chain) for a visual walk-through of the sign → validate → verify flow.
 
 ---
 
