@@ -5,6 +5,7 @@ Detects HTB (HackTheBox) and THM (TryHackMe) based on IP ranges.
 from __future__ import annotations
 
 import ipaddress
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -21,9 +22,12 @@ def _get_tun0_ip() -> Optional[str]:
     tun0_path = Path("/sys/class/net/tun0")
     if not tun0_path.exists():
         return None
+    ip_cmd = shutil.which("ip")
+    if not ip_cmd:
+        return None
     try:
         result = subprocess.run(
-            ["ip", "-4", "addr", "show", "tun0"],
+            [ip_cmd, "-4", "addr", "show", "tun0"],
             capture_output=True,
             text=True,
             timeout=5,

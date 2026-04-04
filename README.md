@@ -413,6 +413,7 @@ Valid result values: `rooted`, `compromised`, `partial`, `failed`, `incomplete`.
 | `src/guild_scroll/web.py` + `src/guild_scroll/web/` | Local preview server and related web helpers |
 | `tests/` | Pytest suite covering CLI flows, schema compatibility, exporters, merge logic, hooks, and validation |
 | `docs/context-engineering/` | Project-specific design notes for tool/agent workflows |
+| `docs/security/` | Security reviews (CVE research, Bandit findings) |
 | `.github/instructions/` | Shared contributor rules for Python, CLI implementation, and release prep |
 | `.github/skills/` | Reusable workflows such as `/issue` and `/release` |
 

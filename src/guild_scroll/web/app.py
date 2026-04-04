@@ -8,6 +8,7 @@ import select
 import signal
 import socket
 import subprocess
+import shutil
 import tempfile
 import threading
 import time
@@ -1643,18 +1644,25 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 del _active_terminals[session_name]
         log_path = session_dir / "terminal.log"
         master_fd, slave_fd = _pty.openpty()
+        zsh_path = shutil.which("zsh")
+        if not zsh_path:
+            os.close(master_fd)
+            os.close(slave_fd)
+            self._send_json({"error": "zsh not found on this system"}, status=500)
+            return
         # Spawn zsh with a minimal, controlled environment to avoid env-variable attacks
+        home_dir = os.environ.get("HOME") or tempfile.gettempdir()
         minimal_env = {
             "TERM": "xterm-256color",
-            "HOME": os.environ.get("HOME", "/tmp"),
+            "HOME": home_dir,
             "USER": os.environ.get("USER", ""),
             "LOGNAME": os.environ.get("LOGNAME", ""),
             "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-            "SHELL": "/bin/zsh",
+            "SHELL": zsh_path,
         }
         try:
             proc = subprocess.Popen(
-                ["zsh"],
+                [zsh_path],
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,
