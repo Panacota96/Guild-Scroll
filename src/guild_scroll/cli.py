@@ -77,11 +77,17 @@ def validate(session_name, repair):
         "\b\n"
         "Examples:\n"
         "  gscroll start htb-machine\n"
+        "  gscroll start htb-machine --mode assessment\n"
         "  gscroll start               # prompts for a name\n"
         "\n"
         "The session directory is created at ./guild_scroll/sessions/<name>/\n"
         "relative to your current working directory (like .git/).\n"
-        "Type 'exit' or Ctrl-D to stop the recording."
+        "Type 'exit' or Ctrl-D to stop the recording.\n"
+        "\n"
+        "Modes:\n"
+        "  ctf         Flexible security (default). HMAC integrity, standard permissions.\n"
+        "  assessment  Strict security. Mandatory HMAC, enforced file permissions (0o600/0o700),\n"
+        "              auto-signing on session end."
     )
 )
 @click.argument("session_name", required=False, default=None)
@@ -89,23 +95,35 @@ def validate(session_name, repair):
     "--join", "join_session", is_flag=True, default=False,
     help="Attach to an existing session as a new terminal part.",
 )
-def start(session_name, join_session):
+@click.option(
+    "--mode", "mode", default=None,
+    type=click.Choice(["ctf", "assessment"], case_sensitive=False),
+    help="Session security mode. CTF is flexible; assessment enforces strict security. "
+         "Default from GUILD_SCROLL_MODE env var or 'ctf'.",
+)
+def start(session_name, join_session, mode):
     """Start a new recording session.
 
     SESSION_NAME is optional; you will be prompted if omitted.
     Inside the session your prompt shows a colored [REC] indicator.
     Use --join to attach a second terminal to an existing session.
+    Use --mode to select security level: ctf (default) or assessment.
     """
     from guild_scroll.session import start_session
+    from guild_scroll.config import get_default_mode
+
+    if mode is None:
+        mode = get_default_mode()
 
     if not session_name:
         session_name = click.prompt("Session name", default="session")
 
+    mode_label = f" [{mode.upper()}]" if mode == "assessment" else ""
     if join_session:
-        click.echo(f"[REC] Joining session '{session_name}' as a new part — type 'exit' or Ctrl-D to stop.")
+        click.echo(f"[REC] Joining session '{session_name}' as a new part{mode_label} — type 'exit' or Ctrl-D to stop.")
     else:
-        click.echo(f"[REC] Starting session '{session_name}' — type 'exit' or Ctrl-D to stop.")
-    start_session(session_name, join=join_session)
+        click.echo(f"[REC] Starting session '{session_name}'{mode_label} — type 'exit' or Ctrl-D to stop.")
+    start_session(session_name, join=join_session, mode=mode)
     click.echo("[gscroll] Session ended and logs saved.")
 
 
@@ -121,13 +139,14 @@ def list_sessions():
     if not sessions:
         click.echo("No sessions found.")
         return
-    click.echo(f"{'NAME':<30} {'START':<28} {'CMDS':>6}")
-    click.echo("-" * 68)
+    click.echo(f"{'NAME':<30} {'MODE':<12} {'START':<28} {'CMDS':>6}")
+    click.echo("-" * 80)
     for s in sessions:
         name = s.get("session_name", "?")
+        mode = s.get("mode") or "ctf"
         start = s.get("start_time", "?")
         count = s.get("command_count", 0)
-        click.echo(f"{name:<30} {start:<28} {count:>6}")
+        click.echo(f"{name:<30} {mode:<12} {start:<28} {count:>6}")
 
 
 @cli.command(
@@ -145,7 +164,8 @@ def status():
     if not info:
         click.echo("No active session.")
         return
-    click.echo(f"[REC] Active session: {info.get('session_name')}")
+    mode = info.get("mode") or "ctf"
+    click.echo(f"[REC] Active session: {info.get('session_name')} [{mode}]")
     click.echo(f"  Started : {info.get('start_time')}")
     click.echo(f"  Commands: {info.get('command_count', 0)}")
 
@@ -611,9 +631,11 @@ def import_session(archive_path):
         "  gscroll serve\n"
         "  gscroll serve --port 1661\n"
         "  gscroll serve --host 0.0.0.0\n"
+        "  gscroll serve --tls-cert cert.pem --tls-key key.pem\n"
         "\n"
         "Defaults to 127.0.0.1. Use --host 0.0.0.0 to expose on all interfaces\n"
         "(e.g. inside Exegol/Kali containers). No authentication is provided.\n"
+        "Use --tls-cert and --tls-key for HTTPS (TLS 1.2+).\n"
     )
 )
 @click.option(
@@ -624,12 +646,30 @@ def import_session(archive_path):
     "--port", default=1551, show_default=True, type=int, metavar="PORT",
     help="Bind port for the local web server.",
 )
-def serve(host, port):
-    """Serve the session viewer and JSON API."""
+@click.option(
+    "--tls-cert", "tls_certfile", default=None, metavar="CERTFILE",
+    help="Path to TLS certificate file (PEM). Enables HTTPS with TLS 1.2+.",
+)
+@click.option(
+    "--tls-key", "tls_keyfile", default=None, metavar="KEYFILE",
+    help="Path to TLS private key file (PEM). Required with --tls-cert.",
+)
+def serve(host, port, tls_certfile, tls_keyfile):
+    """Serve the session viewer and JSON API.
+
+    Optionally enable TLS 1.2+ by providing --tls-cert and --tls-key.
+    """
     from guild_scroll.web import create_server
 
+    if bool(tls_certfile) != bool(tls_keyfile):
+        click.echo("Error: --tls-cert and --tls-key must both be provided.", err=True)
+        sys.exit(1)
+
     try:
-        server = create_server(host=host, port=port)
+        server = create_server(
+            host=host, port=port,
+            tls_certfile=tls_certfile, tls_keyfile=tls_keyfile,
+        )
     except ValueError as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
@@ -640,7 +680,8 @@ def serve(host, port):
         click.echo(f"Error starting server: {exc}", err=True)
         sys.exit(1)
 
-    click.echo(f"[gscroll] Serving on http://{host}:{server.server_port} (Ctrl-C to stop)")
+    scheme = "https" if tls_certfile else "http"
+    click.echo(f"[gscroll] Serving on {scheme}://{host}:{server.server_port} (Ctrl-C to stop)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

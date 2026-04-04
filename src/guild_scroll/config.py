@@ -8,6 +8,17 @@ def get_base_dir() -> Path:
 def get_sessions_dir() -> Path:
     return get_base_dir() / "sessions"
 
+# Session modes
+VALID_MODES = ("ctf", "assessment")
+DEFAULT_MODE = "ctf"
+
+def get_default_mode() -> str:
+    """Return the default session mode from env or fallback to 'ctf'."""
+    mode = os.environ.get("GUILD_SCROLL_MODE", DEFAULT_MODE).lower()
+    if mode not in VALID_MODES:
+        return DEFAULT_MODE
+    return mode
+
 # Asset capture limits
 MAX_ASSET_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 
