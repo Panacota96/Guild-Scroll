@@ -119,10 +119,19 @@ jobs:
         id: short_sha
         run: echo "sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
+      - name: Determine image tag
+        id: image_tag
+        run: |
+          if [ "${{ github.ref_name }}" = "${{ github.event.repository.default_branch }}" ]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          else
+            echo "tag=sha-${{ steps.short_sha.outputs.sha }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.ref_name == github.event.repository.default_branch && 'latest' || format('sha-{0}', steps.short_sha.outputs.sha) }}
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ steps.image_tag.outputs.tag }}
           format: 'sarif'
           output: 'trivy-${{ matrix.image }}.sarif'
 
