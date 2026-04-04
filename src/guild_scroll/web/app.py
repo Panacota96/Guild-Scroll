@@ -1815,21 +1815,49 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
 
-def create_server(host: str = "127.0.0.1", port: int = 1551) -> ThreadingHTTPServer:
-    """Create the report server, binding to *host*:*port*."""
+def create_server(
+    host: str = "127.0.0.1",
+    port: int = 1551,
+    tls_certfile: str | None = None,
+    tls_keyfile: str | None = None,
+) -> ThreadingHTTPServer:
+    """Create the report server, binding to *host*:*port*.
+
+    When *tls_certfile* and *tls_keyfile* are provided, the server socket is
+    wrapped with TLS (minimum TLS 1.2) for encrypted communication.
+    """
     if host not in ("127.0.0.1", "::1", "localhost"):
-        print(
-            f"[gscroll] WARNING: server bound to {host} — "
-            "accessible beyond loopback. Use only on trusted networks.",
-            flush=True,
-        )
-    return ThreadingHTTPServer((host, port), GuildScrollRequestHandler)
+        if tls_certfile is None:
+            print(
+                f"[gscroll] WARNING: server bound to {host} without TLS — "
+                "accessible beyond loopback. Use --tls-cert/--tls-key or restrict to trusted networks.",
+                flush=True,
+            )
+        else:
+            print(
+                f"[gscroll] Server bound to {host} with TLS enabled.",
+                flush=True,
+            )
+    server = ThreadingHTTPServer((host, port), GuildScrollRequestHandler)
+    if tls_certfile is not None and tls_keyfile is not None:
+        import ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(certfile=tls_certfile, keyfile=tls_keyfile)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+    return server
 
 
-def run_server(host: str = "127.0.0.1", port: int = 1551) -> None:
-    server = create_server(host=host, port=port)
+def run_server(
+    host: str = "127.0.0.1",
+    port: int = 1551,
+    tls_certfile: str | None = None,
+    tls_keyfile: str | None = None,
+) -> None:
+    server = create_server(host=host, port=port, tls_certfile=tls_certfile, tls_keyfile=tls_keyfile)
+    scheme = "https" if tls_certfile else "http"
     try:
-        print(f"[gscroll] Serving reports on http://{host}:{server.server_address[1]}")
+        print(f"[gscroll] Serving reports on {scheme}://{host}:{server.server_address[1]}")
         server.serve_forever()
     except KeyboardInterrupt:
         pass

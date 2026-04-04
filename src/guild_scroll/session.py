@@ -18,6 +18,8 @@ from guild_scroll.config import (
     HOOK_EVENTS_NAME,
     SESSION_LOG_NAME,
     PARTS_DIR_NAME,
+    VALID_MODES,
+    get_default_mode,
 )
 from guild_scroll.hooks import create_hook_dir, detect_shell
 from guild_scroll.integrity import generate_session_key, load_session_key
@@ -56,13 +58,16 @@ def _detect_operator() -> Optional[str]:
     return None
 
 
-def start_session(raw_name: str, join: bool = False) -> None:
+def start_session(raw_name: str, join: bool = False, mode: Optional[str] = None) -> None:
     """
     Create the session directory tree, inject hooks, launch script, finalize.
     Blocks until the user types `exit` or Ctrl-D.
 
     If join=True, attach to an existing session as a new numbered part.
+    mode: 'ctf' (default) or 'assessment' — assessment enforces strict security.
     """
+    if mode is None:
+        mode = get_default_mode()
     name = sanitize_session_name(raw_name)
     sess_dir = _session_dir(name)
 
@@ -86,6 +91,10 @@ def start_session(raw_name: str, join: bool = False) -> None:
     for d in (logs_dir, assets_dir, screenshots_dir):
         d.mkdir(parents=True, exist_ok=True)
 
+    # Assessment mode: enforce strict directory permissions
+    if mode == "assessment":
+        _enforce_dir_permissions(sess_dir)
+
     raw_io_path = logs_dir / RAW_IO_LOG_NAME
     timing_path = logs_dir / TIMING_LOG_NAME
     hook_events_path = logs_dir / HOOK_EVENTS_NAME
@@ -105,16 +114,22 @@ def start_session(raw_name: str, join: bool = False) -> None:
         hostname=socket.gethostname(),
         platform=platform,
         operator=_detect_operator(),
+        mode=mode,
     )
     final_log = logs_dir / SESSION_LOG_NAME
     hmac_key = generate_session_key(sess_dir)
     with JSONLWriter(final_log, hmac_key=hmac_key) as writer:
         writer.write(meta.to_dict())
 
+    # Assessment mode: enforce file permissions on key and log
+    if mode == "assessment":
+        _enforce_file_permissions(sess_dir / "session.key")
+        _enforce_file_permissions(final_log)
+
     try:
         start_recording(raw_io_path, timing_path, hook_dir, hook_events_path, session_name=name, shell=shell)
     finally:
-        finalize_session(name, session_id, logs_dir, assets_dir)
+        finalize_session(name, session_id, logs_dir, assets_dir, mode=mode)
         shutil.rmtree(str(hook_dir), ignore_errors=True)
 
 
@@ -174,16 +189,47 @@ def _detect_platform_safe() -> Optional[str]:
         return None
 
 
+def _enforce_dir_permissions(sess_dir: Path) -> None:
+    """Set strict permissions (0o700) on session directory tree for assessment mode."""
+    try:
+        sess_dir.chmod(0o700)
+        for d in sess_dir.iterdir():
+            if d.is_dir():
+                d.chmod(0o700)
+    except OSError:
+        pass
+
+
+def _enforce_file_permissions(file_path: Path) -> None:
+    """Set strict permissions (0o600) on a file for assessment mode."""
+    try:
+        if file_path.exists():
+            file_path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _read_session_mode(sess_dir: Path) -> Optional[str]:
+    """Read the mode from session metadata, return None if not set."""
+    log_file = sess_dir / "logs" / SESSION_LOG_NAME
+    meta = _read_session_meta(log_file)
+    if meta:
+        return meta.get("mode")
+    return None
+
+
 def finalize_session(
     name: str,
     session_id: str,
     logs_dir: Path,
     assets_dir: Path,
     part: int = 1,
+    mode: Optional[str] = None,
 ) -> None:
     """
     Merge hook events into the final session.jsonl.
     Copies asset files detected during the session.
+    In assessment mode, auto-signs the session and enforces file permissions.
     """
     hook_events_path = logs_dir / HOOK_EVENTS_NAME
     final_log = logs_dir / SESSION_LOG_NAME
@@ -233,6 +279,18 @@ def finalize_session(
 
         writer.close()
         _patch_session_meta(final_log, iso_timestamp(), command_count)
+
+        # Assessment mode: auto-sign and enforce permissions
+        sess_root = _session_root_from_logs_dir(logs_dir, part)
+        if mode is None:
+            mode = _read_session_mode(sess_root)
+        if mode == "assessment":
+            try:
+                from guild_scroll.signer import sign_session
+                sign_session(sess_root)
+            except Exception:
+                pass
+            _enforce_file_permissions(final_log)
 
         # Clean up intermediate hook events
         try:

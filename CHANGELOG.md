@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.12.0] — 2026-04-03
+
+### Added
+
+- **Session modes: CTF vs Assessment** — `gscroll start --mode ctf|assessment` selects the security posture for a session. Default mode is configurable via the `GUILD_SCROLL_MODE` environment variable (fallback: `ctf`).
+- **Assessment mode security enforcements** — sessions started in `assessment` mode automatically:
+  - Set strict directory permissions (`0o700`) and file permissions (`0o600`) on the session tree and key file.
+  - Require HMAC signatures on all events (unsigned events are validation errors).
+  - Auto-sign the session (`logs/session.sig`) on finalize.
+- **Validator assessment checks** — `gscroll validate` now reports assessment-specific errors: unsigned events, missing `session.key`, loose file permissions, and missing signatures.
+- **Mode column in `gscroll list`** — session listings now include a `MODE` column showing `ctf` or `assessment`.
+- **Mode indicator in `gscroll status`** — active session status shows the session mode.
+- **TLS support for `gscroll serve`** — new `--tls-cert` and `--tls-key` options enable HTTPS with TLS 1.2+ minimum version for the web report server.
+- **`mode` field in `SessionMeta`** — stored in JSONL logs for audit trail; backward-compatible with legacy sessions (defaults to `None`).
+
+### Changed
+
+- `gscroll start` now accepts `--mode ctf|assessment` (default: `ctf`). Assessment mode displays `[ASSESSMENT]` in the start banner.
+- `gscroll serve` warning for non-loopback bind now suggests `--tls-cert`/`--tls-key`.
+
+---
+
 ## [0.11.1] — 2026-04-03
 
 ### Added

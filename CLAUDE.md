@@ -26,14 +26,15 @@ Entry point: `pyproject.toml` → `gscroll = "guild_scroll.cli:cli"`
 
 | Command | Description |
 |---------|-------------|
-| `gscroll start [NAME]` | Start a new recording session with persistent prompt indicator |
-| `gscroll list` | List all recorded sessions |
+| `gscroll start [NAME] [--mode ctf\|assessment]` | Start a new recording session with persistent prompt indicator |
+| `gscroll list` | List all recorded sessions (with mode column) |
 | `gscroll status` | Show active session (via `GUILD_SCROLL_SESSION` env var; prints `[REC]` when active) |
 | `gscroll note [SESSION] TEXT [--tag TAG]` | Add an annotation to a session |
 | `gscroll export [SESSION] --format md\|html\|cast [-o PATH]` | Export session to file |
 | `gscroll search [SESSION] [--tool] [--phase] [--exit-code] [--cwd]` | Filter/search commands |
 | `gscroll replay [SESSION] [--speed FLOAT]` | Replay session via scriptreplay |
 | `gscroll tui [SESSION]` | Launch Textual TUI dashboard |
+| `gscroll serve [--tls-cert FILE --tls-key FILE]` | Serve web viewer with optional TLS 1.2+ |
 | `gscroll update` | Check and install latest version |
 
 ## Architecture & Conventions

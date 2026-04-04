@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.11.1-green)
+![Version](https://img.shields.io/badge/version-0.12.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -460,6 +460,55 @@ Override the base path with `GUILD_SCROLL_DIR`.
 | `note` | `text`, `timestamp`, `tags` |
 
 > **Operator metadata:** The `operator` field in `session_meta` is auto-populated from the `USER`, `LOGNAME`, or `USERNAME` environment variable when a session starts. It is included in Markdown, HTML, and Obsidian exports and travels with the session archive.
+
+---
+
+## Session Modes: CTF vs Assessment
+
+Guild Scroll supports two session security modes: **CTF** (default) and **Assessment**.
+
+### CTF Mode (default)
+
+Flexible security suitable for CTF competitions and practice:
+
+- HMAC integrity is generated for all events
+- Unsigned legacy events are accepted during validation
+- Standard file permissions
+- Session signing is optional
+
+```bash
+gscroll start htb-machine                # CTF mode (default)
+gscroll start htb-machine --mode ctf     # explicit
+```
+
+### Assessment Mode
+
+Strict security for professional penetration testing engagements:
+
+- **Mandatory HMAC** — every event must carry a valid HMAC signature; unsigned events are validation errors
+- **Strict permissions** — session directories are set to `0o700` (owner-only), key files to `0o600`
+- **Auto-signing** — session is automatically signed (`logs/session.sig`) when finalized
+- **Validation enforcement** — `gscroll validate` checks permissions, signing, and requires all events be HMAC-signed
+
+```bash
+gscroll start client-pentest --mode assessment
+```
+
+Set the default mode via environment variable:
+
+```bash
+export GUILD_SCROLL_MODE=assessment
+gscroll start client-pentest             # uses assessment mode
+```
+
+### TLS for Web Server
+
+Enable HTTPS for the report server with TLS 1.2+ using `--tls-cert` and `--tls-key`:
+
+```bash
+gscroll serve --tls-cert cert.pem --tls-key key.pem
+gscroll serve --host 0.0.0.0 --tls-cert cert.pem --tls-key key.pem
+```
 
 ---
 
