@@ -3,6 +3,7 @@ import re
 import shutil
 import subprocess
 import sys
+from urllib.parse import urlparse
 from urllib.request import urlopen
 from urllib.error import URLError
 
@@ -20,8 +21,16 @@ def parse_version(s: str) -> tuple:
         raise ValueError(f"Invalid version format: {s!r}")
 
 
+def _ensure_https(url: str) -> None:
+    """Guard against non-HTTPS or malformed update URLs."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError(f"Refusing to fetch from non-HTTPS URL: {url}")
+
+
 def fetch_remote_version() -> str:
     """Fetch the __version__ string from GitHub raw source."""
+    _ensure_https(GITHUB_RAW_VERSION_URL)
     try:
         with urlopen(GITHUB_RAW_VERSION_URL, timeout=10) as resp:
             content = resp.read().decode()
