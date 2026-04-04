@@ -31,7 +31,7 @@ Entry point: `pyproject.toml` → `gscroll = "guild_scroll.cli:cli"`
 | `gscroll status` | Show active session (via `GUILD_SCROLL_SESSION` env var; prints `[REC]` when active) |
 | `gscroll note [SESSION] TEXT [--tag TAG]` | Add an annotation to a session |
 | `gscroll export [SESSION] --format md\|html\|cast [-o PATH]` | Export session to file |
-| `gscroll search [SESSION] [--tool] [--phase] [--exit-code] [--cwd]` | Filter/search commands |
+| `gscroll search [SESSION] [--tool] [--phase] [--exit-code] [--cwd] [--output-contains]` | Filter/search commands |
 | `gscroll replay [SESSION] [--speed FLOAT]` | Replay session via scriptreplay |
 | `gscroll tui [SESSION]` | Launch Textual TUI dashboard |
 | `gscroll serve [--tls-cert FILE --tls-key FILE]` | Serve web viewer with optional TLS 1.2+ |
@@ -44,6 +44,7 @@ Shared repo-scoped Copilot guidance now lives in `.github/`:
 - **Python instructions**: `.github/instructions/python-conventions.instructions.md`
 - **CLI instructions**: `.github/instructions/cli-implementation.instructions.md`
 - **Release instructions**: `.github/instructions/release-prep.instructions.md`
+- **Visual diagrams reference**: `docs/diagrams.md`
 
 The original `.claude/` files remain useful as local/personal context. Key rules stay the same: no external deps beyond `click`, lazy imports in CLI, dataclass `to_dict()`/`from_dict()` with `type`-first serialization, TDD (tests first).
 
