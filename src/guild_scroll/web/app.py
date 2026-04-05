@@ -440,8 +440,6 @@ def _render_index_page(sessions: list[dict]) -> str:
     <a class="rune-link" href="/session/{session_path}">Open Session</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
-    <button class="rune-link" type="button"
-      onclick="gsCloseSession({js_session_path}, {js_display_name}, this)">Close</button>
     <button class="rune-link danger-link" type="button"
       onclick="gsCloseSession({js_session_path}, {js_display_name}, this)">Close</button>
     <button class="rune-link danger-link" type="button"
@@ -732,22 +730,6 @@ body {
   </section>
 </main>
 <script>
-function gsCloseSession(sessionPath, displayName, btn) {
-  if (!confirm('Close session "' + displayName + '"?\\nThis marks it as finalized and stops live indicators.')) return;
-  fetch('/api/session/' + sessionPath + '/close', {method: 'POST'})
-    .then(function(r) { return r.json().then(function(d) { return {status: r.status, body: d}; }); })
-    .then(function(result) {
-      var d = result.body || {};
-      if (result.status < 400 && (d.closed || d.finalized)) {
-        if (btn) { btn.textContent = 'Closed'; btn.disabled = true; }
-        alert('Session closed.');
-      } else {
-        alert('Close failed: ' + (d.error || 'Unknown error'));
-      }
-    })
-    .catch(function() { alert('Close failed: network error'); });
-}
-
 function gsDeleteSession(sessionPath, displayName, btn) {
   if (!confirm('Delete session "' + displayName + '"?\\nThis action cannot be undone and will remove all logs and data.')) return;
   fetch('/api/session/' + sessionPath, {method: 'DELETE'})
@@ -946,6 +928,9 @@ def _render_session_page(
         js_display_name = json.dumps(session.meta.session_name)
         onclick_session_name = html.escape(js_session_name, quote=True)
         onclick_display_name = html.escape(js_display_name, quote=True)
+        is_finalized = bool(session.meta.finalized)
+        status_class = "heartbeat-badge status-closed" if is_finalized else "heartbeat-badge status-unknown"
+        status_label = "■ CLOSED" if is_finalized else "● UNKNOWN"
         preview_count = len(discoveries["timeline"])
         total_discoveries = len(discoveries["notes"]) + len(discoveries["assets"])
 
@@ -1038,8 +1023,6 @@ a {{ color: #8cc8ff; }}
             <a class="action-pill" href="/session/{session_name}?{md_query}">Markdown preview</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
-            <button class="action-pill" type="button"
-              onclick="gsCloseSession({js_session_name}, {js_display_name})">Close Session</button>
             <button class="action-pill danger-pill" type="button"
               onclick="gsCloseSession({onclick_session_name}, {onclick_display_name})">Close Session</button>
             <button class="action-pill danger-pill" type="button"
@@ -1110,20 +1093,6 @@ function gsDeleteSession(sessionPath, displayName) {{
     .catch(function() {{ alert('Delete failed: network error'); }});
 }}
 function gsCloseSession(sessionPath, displayName) {{
-  if (!confirm('Close session "' + displayName + '"?\\nThis stops any live terminal and removes the session data.')) return;
-  fetch('/api/session/' + sessionPath + '/close', {{method: 'POST'}})
-    .then(function(r) {{ return r.json(); }})
-    .then(function(d) {{
-      if (d.closed !== undefined) {{
-        window.location.href = '/';
-      }} else {{
-        alert('Close failed: ' + (d.error || 'Unknown error'));
-      }}
-    }})
-    .catch(function() {{ alert('Close failed: network error'); }});
-}}
-
-function gsCloseSession(sessionPath, displayName) {{
   if (!confirm('Close session "' + displayName + '"?\\nThis marks the session as ended and stops live heartbeats.')) return;
   fetch('/api/session/' + sessionPath + '/close', {{method: 'POST'}})
     .then(function(r) {{ return r.json().then(function(d) {{ return {{status: r.status, body: d}}; }}); }})
@@ -1149,8 +1118,14 @@ function gsHeartbeat() {{
     .then(function(result) {{
       var el = document.getElementById('gs-session-status');
       if (!el) return;
+      if (!result.ok) {{
+        el.textContent = '✖ EXPIRED';
+        el.className = 'heartbeat-badge status-expired';
+        if (window.gsHeartbeatTimer) {{ clearInterval(window.gsHeartbeatTimer); }}
+        return;
+      }}
       var status = (result.body && result.body.status) || 'unknown';
-      if (result.ok && (status === 'live' || status === 'ok')) {{
+      if (status === 'live' || status === 'ok') {{
         el.textContent = '⚡ LIVE';
         el.className = 'heartbeat-badge status-live';
       }} else if (status === 'unknown') {{

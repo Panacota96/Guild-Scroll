@@ -473,6 +473,11 @@ def close_session(session_name: str) -> dict[str, object]:
         read_plaintext,
     )
 
+    if is_encrypted(log_path) and load_encryption_key(resolved_sess_dir) is None:
+        raise PermissionError(
+            f"Session log for {session_name!r} is encrypted and the encryption key is unavailable"
+        )
+
     content = read_plaintext(log_path)
     now = iso_timestamp()
     rewritten: list[str] = []
