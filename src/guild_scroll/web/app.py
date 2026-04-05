@@ -24,7 +24,7 @@ from guild_scroll.exporters.markdown import export_markdown
 from guild_scroll.exporters.output_extractor import build_command_output_map
 from guild_scroll.log_schema import SessionMeta
 from guild_scroll.search import SearchFilter, search_commands
-from guild_scroll.session import delete_session, list_sessions
+from guild_scroll.session import close_session, delete_session, list_sessions
 from guild_scroll.session_loader import LoadedSession, load_session
 from guild_scroll.utils import generate_session_id, iso_timestamp, sanitize_session_name
 
@@ -111,6 +111,11 @@ def _heartbeat_status(session_name: str) -> str:
     if time.monotonic() - ts > _HEARTBEAT_EXPIRY_SECS:
         return "expired"
     return "live"
+
+
+def _clear_heartbeat(session_name: str) -> None:
+    with _heartbeats_lock:
+        _session_heartbeats.pop(session_name, None)
 
 
 # ── Upload helpers ─────────────────────────────────────────────────────────────
@@ -438,7 +443,9 @@ def _render_index_page(sessions: list[dict]) -> str:
     <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
     <button class="rune-link danger-link" type="button"
-      onclick="gsDeleteSession({html_js_session_path}, {html_js_display_name}, this)">Delete</button>
+      onclick="gsCloseSession({js_session_path}, {js_display_name}, this)">Close</button>
+    <button class="rune-link danger-link" type="button"
+      onclick="gsDeleteSession({js_session_path}, {js_display_name}, this)">Delete</button>
   </nav>
 </article>
 """.format(
@@ -739,6 +746,20 @@ function gsDeleteSession(sessionPath, displayName, btn) {
     })
     .catch(function() { alert('Delete failed: network error'); });
 }
+function gsCloseSession(sessionPath, displayName, btn) {
+  if (!confirm('Close session "' + displayName + '"?\\nThis stops any live terminal and removes the session data.')) return;
+  fetch('/api/session/' + sessionPath + '/close', {method: 'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.closed !== undefined) {
+        var card = btn.closest('article');
+        if (card) { card.remove(); gsUpdateCount(); }
+      } else {
+        alert('Close failed: ' + (d.error || 'Unknown error'));
+      }
+    })
+    .catch(function() { alert('Close failed: network error'); });
+}
 var searchInput = document.getElementById('gs-search');
 var sortSelect = document.getElementById('gs-sort');
 var countEl = document.getElementById('gs-count');
@@ -907,6 +928,11 @@ def _render_session_page(
         session_name = quote(session.meta.session_name)
         js_session_name = json.dumps(session_name)
         js_display_name = json.dumps(session.meta.session_name)
+        onclick_session_name = html.escape(js_session_name, quote=True)
+        onclick_display_name = html.escape(js_display_name, quote=True)
+        is_finalized = bool(session.meta.finalized)
+        status_class = "heartbeat-badge status-closed" if is_finalized else "heartbeat-badge status-unknown"
+        status_label = "■ CLOSED" if is_finalized else "● UNKNOWN"
         preview_count = len(discoveries["timeline"])
         total_discoveries = len(discoveries["notes"]) + len(discoveries["assets"])
 
@@ -964,6 +990,7 @@ a {{ color: #8cc8ff; }}
 .status-live {{ background: #1a472a; color: #6ee89e; border: 1px solid #2ea863; }}
 .status-expired {{ background: #4a1a1a; color: #ff9090; border: 1px solid #c03030; }}
 .status-unknown {{ background: #252525; color: #aaaaaa; border: 1px solid #555; }}
+.status-closed {{ background: #1f2430; color: #d0d7e2; border: 1px solid #5a6b85; }}
 .upload-zone {{ margin-top: 0.9rem; border: 2px dashed #3d608d; border-radius: 8px; padding: 0.8rem 0.6rem; text-align: center; cursor: pointer; transition: border-color 160ms, background 160ms; color: #9eb8da; font-size: 0.83rem; }}
 .upload-zone:hover, .upload-zone.drag-active {{ border-color: #52d0ff; background: rgba(42,208,255,0.07); color: #d1f0ff; }}
 .upload-previews {{ margin-top: 0.55rem; display: grid; gap: 0.45rem; }}
@@ -989,7 +1016,7 @@ a {{ color: #8cc8ff; }}
 <main class="page-shell">
     <section class="header-card">
         <h1>Session: {html.escape(session.meta.session_name)}
-            <span id="gs-session-status" class="heartbeat-badge status-unknown">● UNKNOWN</span>
+            <span id="gs-session-status" class="{status_class}">{status_label}</span>
         </h1>
         <p class="meta-line">Commands in report: {len(session.commands)} | Preview format: {html.escape(preview_format)}</p>
         <div class="actions">
@@ -999,7 +1026,9 @@ a {{ color: #8cc8ff; }}
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
             <button class="action-pill danger-pill" type="button"
-              onclick="gsDeleteSession({html.escape(js_session_name)}, {html.escape(js_display_name)})">Delete Session</button>
+              onclick="gsCloseSession({onclick_session_name}, {onclick_display_name})">Close Session</button>
+            <button class="action-pill danger-pill" type="button"
+              onclick="gsDeleteSession({onclick_session_name}, {onclick_display_name})">Delete Session</button>
         </div>
     </section>
 
@@ -1051,6 +1080,7 @@ a {{ color: #8cc8ff; }}
     </section>
 </main>
 <script>
+let gsIsFinalized = {json.dumps(is_finalized)};
 function gsDeleteSession(sessionPath, displayName) {{
   if (!confirm('Delete session "' + displayName + '"?\\nThis action cannot be undone and will remove all logs and data.')) return;
   fetch('/api/session/' + sessionPath, {{method: 'DELETE'}})
@@ -1064,22 +1094,59 @@ function gsDeleteSession(sessionPath, displayName) {{
     }})
     .catch(function() {{ alert('Delete failed: network error'); }});
 }}
+function gsCloseSession(sessionPath, displayName) {{
+  if (!confirm('Close session "' + displayName + '"?\\nThis marks the session as ended and stops live heartbeats.')) return;
+  fetch('/api/session/' + sessionPath + '/close', {{method: 'POST'}})
+    .then(function(r) {{ return r.json().then(function(d) {{ return {{status: r.status, body: d}}; }}); }})
+    .then(function(result) {{
+      var d = result.body || {{}};
+      if (result.status < 400 && (d.closed || d.finalized)) {{
+        gsIsFinalized = true;
+        var badge = document.getElementById('gs-session-status');
+        if (badge) {{ badge.textContent = '■ CLOSED'; badge.className = 'heartbeat-badge status-closed'; }}
+        if (window.gsHeartbeatTimer) {{ clearInterval(window.gsHeartbeatTimer); }}
+        alert('Session closed.');
+      }} else {{
+        alert('Close failed: ' + (d.error || 'Unknown error'));
+      }}
+    }})
+    .catch(function() {{ alert('Close failed: network error'); }});
+}}
 
 // ── Heartbeat ──────────────────────────────────────────────────
 function gsHeartbeat() {{
   fetch('/api/session/' + {js_session_name} + '/heartbeat', {{method: 'POST'}})
-    .then(function(r) {{ return r.json(); }})
-    .then(function() {{
+    .then(function(r) {{ return r.json().then(function(d) {{ return {{ok: r.ok, body: d}}; }}); }})
+    .then(function(result) {{
       var el = document.getElementById('gs-session-status');
-      if (el) {{ el.textContent = '⚡ LIVE'; el.className = 'heartbeat-badge status-live'; }}
+      if (!el) return;
+      if (!result.ok) {{
+        el.textContent = '✖ EXPIRED';
+        el.className = 'heartbeat-badge status-expired';
+        if (window.gsHeartbeatTimer) {{ clearInterval(window.gsHeartbeatTimer); }}
+        return;
+      }}
+      var status = (result.body && result.body.status) || 'unknown';
+      if (status === 'live' || status === 'ok') {{
+        el.textContent = '⚡ LIVE';
+        el.className = 'heartbeat-badge status-live';
+      }} else if (status === 'unknown') {{
+        el.textContent = '● UNKNOWN';
+        el.className = 'heartbeat-badge status-unknown';
+      }} else {{
+        el.textContent = '✖ EXPIRED';
+        el.className = 'heartbeat-badge status-expired';
+      }}
     }})
     .catch(function() {{
       var el = document.getElementById('gs-session-status');
       if (el) {{ el.textContent = '✖ EXPIRED'; el.className = 'heartbeat-badge status-expired'; }}
     }});
 }}
-setInterval(gsHeartbeat, 30000);
-gsHeartbeat();
+if (!gsIsFinalized) {{
+  window.gsHeartbeatTimer = setInterval(gsHeartbeat, 30000);
+  gsHeartbeat();
+}}
 
 // ── Asset upload ───────────────────────────────────────────────
 var _uploadZone = document.getElementById('gs-upload-zone');
@@ -1265,6 +1332,10 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/sessions":
             self._handle_create_session()
             return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/close"):
+            session_name = parsed.path[len("/api/session/"):-len("/close")].strip("/")
+            self._handle_close_session(session_name)
+            return
         if parsed.path.startswith("/api/session/") and parsed.path.endswith("/upload"):
             session_name = parsed.path[len("/api/session/"):-len("/upload")].strip("/")
             self._handle_upload(session_name)
@@ -1441,7 +1512,46 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         except OSError as exc:
             self._send_json({"error": f"Could not delete session: {exc}"}, status=500)
             return
+        _clear_heartbeat(session_name)
         self._send_json({"deleted": session_name})
+
+    def _handle_close_session(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        sessions_dir = get_sessions_dir()
+        try:
+            session_dir = (sessions_dir / session_name).resolve(strict=False)
+            session_dir.relative_to(sessions_dir.resolve())
+        except (OSError, ValueError):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        if not session_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        try:
+            delete_session(session_name)
+        except FileNotFoundError:
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+        except ValueError:
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        except OSError as exc:
+            self._send_json({"error": f"Could not close session: {exc}"}, status=500)
+            return
+        terminal_stopped = self._stop_active_terminal(session_name)
+        with _heartbeats_lock:
+            heartbeat_cleared = _session_heartbeats.pop(session_name, None) is not None
+        self._send_json(
+            {
+                "closed": session_name,
+                "terminal_stopped": terminal_stopped,
+                "heartbeat_cleared": heartbeat_cleared,
+            }
+        )
 
     # ── Session creation ───────────────────────────────────────────────────────
 
@@ -1585,6 +1695,9 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         if not _is_safe_session_name(session_name):
             self._send_json({"error": "Invalid session name."}, status=400)
             return
+        if not (get_sessions_dir() / session_name).exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
         status = _heartbeat_status(session_name)
         with _heartbeats_lock:
             ts = _session_heartbeats.get(session_name)
@@ -1603,6 +1716,9 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         session_name = unquote(raw_name)
         if not _is_safe_session_name(session_name):
             self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        if not (get_sessions_dir() / session_name).exists():
+            self._send_json({"error": "Session not found"}, status=404)
             return
         _record_heartbeat(session_name)
         self._send_json({
@@ -1729,16 +1845,11 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             "alive": alive,
         })
 
-    def _handle_terminal_stop(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
+    def _stop_active_terminal(self, session_name: str) -> bool:
         with _terminals_lock:
             info = _active_terminals.pop(session_name, None)
         if info is None:
-            self._send_json({"error": "No active terminal"}, status=404)
-            return
+            return False
         # Close master fd first so the reader thread unblocks and exits
         try:
             os.close(info.master_fd)
@@ -1765,6 +1876,17 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 os.waitpid(info.pid, 0)
             except OSError:
                 pass
+        return True
+
+    def _handle_terminal_stop(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        stopped = self._stop_active_terminal(session_name)
+        if not stopped:
+            self._send_json({"error": "No active terminal"}, status=404)
+            return
         self._send_json({"stopped": True, "session": session_name})
 
     def _load_filtered_session(self, raw_name: str, params: dict[str, list[str]]) -> LoadedSession:
