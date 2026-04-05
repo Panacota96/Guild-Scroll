@@ -8,7 +8,6 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
