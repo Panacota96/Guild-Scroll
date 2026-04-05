@@ -447,6 +447,70 @@ def delete_session(session_name: str) -> None:
     shutil.rmtree(str(resolved_sess_dir))
 
 
+def close_session(session_name: str) -> dict[str, object]:
+    """
+    Mark a session as closed by setting end_time (if missing) and finalized.
+
+    Returns a summary dict containing the session name, end_time, and finalized flag.
+    """
+    sessions_dir = get_sessions_dir()
+    sess_dir = sessions_dir / session_name
+    try:
+        resolved_sessions_dir = sessions_dir.resolve()
+        resolved_sess_dir = sess_dir.resolve(strict=False)
+        resolved_sess_dir.relative_to(resolved_sessions_dir)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Invalid session name: {session_name!r}") from exc
+
+    log_path = resolved_sess_dir / "logs" / SESSION_LOG_NAME
+    if not log_path.exists():
+        raise FileNotFoundError(f"Session not found: {session_name!r}")
+
+    from guild_scroll.crypto import (
+        encrypt_data,
+        is_encrypted,
+        load_encryption_key,
+        read_plaintext,
+    )
+
+    content = read_plaintext(log_path)
+    now = iso_timestamp()
+    rewritten: list[str] = []
+    end_time = None
+    found_meta = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            record = json.loads(stripped)
+        except json.JSONDecodeError:
+            rewritten.append(stripped)
+            continue
+        if record.get("type") == "session_meta":
+            found_meta = True
+            if not record.get("end_time"):
+                record["end_time"] = now
+            end_time = record.get("end_time") or now
+            record["finalized"] = True
+        rewritten.append(json.dumps(record, ensure_ascii=False))
+
+    if not found_meta:
+        raise ValueError(f"No session_meta record found for {session_name!r}")
+
+    new_content = "\n".join(rewritten) + "\n"
+    if is_encrypted(log_path):
+        enc_key = load_encryption_key(resolved_sess_dir)
+        if enc_key is not None:
+            log_path.write_bytes(encrypt_data(enc_key, new_content.encode("utf-8")))
+        else:
+            log_path.write_text(new_content, encoding="utf-8")
+    else:
+        log_path.write_text(new_content, encoding="utf-8")
+
+    return {"session": session_name, "end_time": end_time, "finalized": True}
+
+
 def get_session_status() -> Optional[dict]:
     """
     Return the active session info if one is running (detected via env var),

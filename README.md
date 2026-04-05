@@ -48,7 +48,7 @@ gscroll export --format md   # structured report, ready to share
 | **Verification** | `gscroll verify [SESSION] [--key KEYFILE]` verifies integrity; exits non-zero on mismatch |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
-| **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API; sessions can be deleted from the index or detail pages via a confirmation-guarded Delete button; drag-and-drop asset uploads, session heartbeat tracking, and an integrated zsh terminal are available from the session detail page |
+| **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API; sessions can be closed (marks finalized, stops live status) or deleted from the index/detail pages after confirmation; drag-and-drop asset uploads, session heartbeat tracking, and an integrated zsh terminal are available from the session detail page |
 | **Session auto-detect** | All sub-commands pick up `GUILD_SCROLL_SESSION` automatically |
 | **Self-update** | `gscroll update` checks GitHub and reinstalls |
 

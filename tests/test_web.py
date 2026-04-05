@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
@@ -880,6 +881,67 @@ class TestDeleteSession:
 
         assert status == 200
         assert not sess_dir.exists()
+
+
+class TestSessionClose:
+    def test_close_marks_session_finalized(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "closable")
+
+        with _running_server() as server:
+            status, headers, body = _request_post(
+                server, "/api/session/closable/close", b""
+            )
+
+        payload = json.loads(body)
+        assert status == 200
+        assert headers["Content-Type"].startswith("application/json")
+        assert payload["session"] == "closable"
+        assert payload["finalized"] is True
+        datetime.fromisoformat(payload["end_time"])
+        log_path = sessions_dir / "closable" / "logs" / SESSION_LOG_NAME
+        meta = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+        assert meta["finalized"] is True
+        assert meta["end_time"] == payload["end_time"]
+
+    def test_close_invalid_name_returns_400(self, isolated_sessions_dir):
+        with _running_server() as server:
+            status, _, body = _request_post(server, "/api/session/../escape/close", b"")
+
+        payload = json.loads(body)
+        assert status == 400
+        assert payload["error"] == "Invalid session name."
+
+    def test_close_missing_session_returns_404(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            status, _, body = _request_post(server, "/api/session/not-there/close", b"")
+
+        payload = json.loads(body)
+        assert status == 404
+        assert payload["error"] == "Session not found"
+
+    def test_close_clears_live_heartbeat(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "live-one")
+
+        with _running_server() as server:
+            _request_post(server, "/api/session/live-one/heartbeat", b"")
+            status_live, _, body_live = _request(server, "/api/session/live-one/heartbeat")
+            payload_live = json.loads(body_live)
+            assert payload_live["status"] == "live"
+
+            status_close, _, _ = _request_post(server, "/api/session/live-one/close", b"")
+            assert status_close == 200
+
+            status_after, _, body_after = _request(server, "/api/session/live-one/heartbeat")
+            payload_after = json.loads(body_after)
+            assert status_after == 200
+            assert payload_after["status"] == "unknown"
 
 
 # ── PNG/JPEG magic bytes for test payloads ────────────────────────────────────
