@@ -416,8 +416,8 @@ def _render_index_page(sessions: list[dict]) -> str:
             command_count = _format_command_count(session.get("command_count"))
             quoted_name = quote(name, safe="")
             escaped_name = html.escape(name)
-            js_session_path = json.dumps(quoted_name)
-            js_display_name = json.dumps(name)
+            js_session_path = html.escape(json.dumps(quoted_name), quote=True)
+            js_display_name = html.escape(json.dumps(name), quote=True)
             card_items.append(
                 """
 <article class="session-card" data-name="{data_name}" data-start="{data_start}"
@@ -435,6 +435,8 @@ def _render_index_page(sessions: list[dict]) -> str:
     <a class="rune-link" href="/session/{session_path}">Open Session</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
+    <button class="rune-link danger-link" type="button"
+      onclick="gsCloseSession({js_session_path}, {js_display_name}, this)">Close</button>
     <button class="rune-link danger-link" type="button"
       onclick="gsDeleteSession({js_session_path}, {js_display_name}, this)">Delete</button>
   </nav>
@@ -737,6 +739,20 @@ function gsDeleteSession(sessionPath, displayName, btn) {
     })
     .catch(function() { alert('Delete failed: network error'); });
 }
+function gsCloseSession(sessionPath, displayName, btn) {
+  if (!confirm('Close session "' + displayName + '"?\\nThis stops any live terminal and removes the session data.')) return;
+  fetch('/api/session/' + sessionPath + '/close', {method: 'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.closed !== undefined) {
+        var card = btn.closest('article');
+        if (card) { card.remove(); gsUpdateCount(); }
+      } else {
+        alert('Close failed: ' + (d.error || 'Unknown error'));
+      }
+    })
+    .catch(function() { alert('Close failed: network error'); });
+}
 var searchInput = document.getElementById('gs-search');
 var sortSelect = document.getElementById('gs-sort');
 var countEl = document.getElementById('gs-count');
@@ -905,6 +921,8 @@ def _render_session_page(
         session_name = quote(session.meta.session_name)
         js_session_name = json.dumps(session_name)
         js_display_name = json.dumps(session.meta.session_name)
+        onclick_session_name = html.escape(js_session_name, quote=True)
+        onclick_display_name = html.escape(js_display_name, quote=True)
         preview_count = len(discoveries["timeline"])
         total_discoveries = len(discoveries["notes"]) + len(discoveries["assets"])
 
@@ -997,7 +1015,9 @@ a {{ color: #8cc8ff; }}
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
             <button class="action-pill danger-pill" type="button"
-              onclick="gsDeleteSession({js_session_name}, {js_display_name})">Delete Session</button>
+              onclick="gsCloseSession({onclick_session_name}, {onclick_display_name})">Close Session</button>
+            <button class="action-pill danger-pill" type="button"
+              onclick="gsDeleteSession({onclick_session_name}, {onclick_display_name})">Delete Session</button>
         </div>
     </section>
 
@@ -1061,6 +1081,19 @@ function gsDeleteSession(sessionPath, displayName) {{
       }}
     }})
     .catch(function() {{ alert('Delete failed: network error'); }});
+}}
+function gsCloseSession(sessionPath, displayName) {{
+  if (!confirm('Close session "' + displayName + '"?\\nThis stops any live terminal and removes the session data.')) return;
+  fetch('/api/session/' + sessionPath + '/close', {{method: 'POST'}})
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (d.closed !== undefined) {{
+        window.location.href = '/';
+      }} else {{
+        alert('Close failed: ' + (d.error || 'Unknown error'));
+      }}
+    }})
+    .catch(function() {{ alert('Close failed: network error'); }});
 }}
 
 // ── Heartbeat ──────────────────────────────────────────────────
@@ -1263,6 +1296,10 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/sessions":
             self._handle_create_session()
             return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/close"):
+            session_name = parsed.path[len("/api/session/"):-len("/close")].strip("/")
+            self._handle_close_session(session_name)
+            return
         if parsed.path.startswith("/api/session/") and parsed.path.endswith("/upload"):
             session_name = parsed.path[len("/api/session/"):-len("/upload")].strip("/")
             self._handle_upload(session_name)
@@ -1440,6 +1477,44 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": f"Could not delete session: {exc}"}, status=500)
             return
         self._send_json({"deleted": session_name})
+
+    def _handle_close_session(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        sessions_dir = get_sessions_dir()
+        try:
+            session_dir = (sessions_dir / session_name).resolve(strict=False)
+            session_dir.relative_to(sessions_dir.resolve())
+        except (OSError, ValueError):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        if not session_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        try:
+            delete_session(session_name)
+        except FileNotFoundError:
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+        except ValueError:
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        except OSError as exc:
+            self._send_json({"error": f"Could not close session: {exc}"}, status=500)
+            return
+        terminal_stopped = self._stop_active_terminal(session_name)
+        with _heartbeats_lock:
+            heartbeat_cleared = _session_heartbeats.pop(session_name, None) is not None
+        self._send_json(
+            {
+                "closed": session_name,
+                "terminal_stopped": terminal_stopped,
+                "heartbeat_cleared": heartbeat_cleared,
+            }
+        )
 
     # ── Session creation ───────────────────────────────────────────────────────
 
@@ -1727,16 +1802,11 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             "alive": alive,
         })
 
-    def _handle_terminal_stop(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
+    def _stop_active_terminal(self, session_name: str) -> bool:
         with _terminals_lock:
             info = _active_terminals.pop(session_name, None)
         if info is None:
-            self._send_json({"error": "No active terminal"}, status=404)
-            return
+            return False
         # Close master fd first so the reader thread unblocks and exits
         try:
             os.close(info.master_fd)
@@ -1763,6 +1833,17 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 os.waitpid(info.pid, 0)
             except OSError:
                 pass
+        return True
+
+    def _handle_terminal_stop(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        stopped = self._stop_active_terminal(session_name)
+        if not stopped:
+            self._send_json({"error": "No active terminal"}, status=404)
+            return
         self._send_json({"stopped": True, "session": session_name})
 
     def _load_filtered_session(self, raw_name: str, params: dict[str, list[str]]) -> LoadedSession:
