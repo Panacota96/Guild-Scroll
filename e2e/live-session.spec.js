@@ -10,9 +10,21 @@ test('live terminal can be stopped from the session page when available', async 
     `${baseURL}/api/session/${encoded}/terminal/start`,
   );
   const startJson = await startResponse.json();
-  if (startJson.error) {
+
+  const ENV_LIMIT_STATUSES = new Set([500, 501]);
+  const ENV_LIMIT_MESSAGES = [
+    'zsh not found on this system',
+    'Terminal not supported on this platform',
+  ];
+  const isEnvLimit =
+    ENV_LIMIT_STATUSES.has(startResponse.status()) &&
+    ENV_LIMIT_MESSAGES.some((msg) => startJson.error?.includes(msg));
+
+  if (isEnvLimit) {
     test.skip(`Terminal not available in this environment: ${startJson.error}`);
   }
+
+  expect(startResponse.ok(), `Terminal start failed unexpectedly: ${startJson.error}`).toBe(true);
 
   await page.goto(`${baseURL}/session/${encoded}`);
 
