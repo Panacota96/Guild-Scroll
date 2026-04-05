@@ -856,6 +856,11 @@ Contributions, bug reports, and feature requests are welcome.
 4. Run the test suite: `PYTHONPATH=src python3 -m pytest tests/ -v`
 5. Open a pull request — PRs are reviewed before merging to `main`
 
+**Web UI tests (Playwright):**
+- `npm install && npx playwright install chromium`
+- `npm run test:e2e -- --project=chromium` (headless) or `npm run test:e2e:headed -- --project=chromium`
+- Coverage and live-session caveats: [docs/playwright.md](docs/playwright.md)
+
 **Guidelines:**
 - No external dependencies beyond `click` in core code
 - Follow the existing dataclass patterns (`to_dict()` / `from_dict()` with `type`-first serialization)

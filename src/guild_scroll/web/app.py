@@ -436,7 +436,7 @@ def _render_index_page(sessions: list[dict]) -> str:
     <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
     <button class="rune-link danger-link" type="button"
-      onclick="gsDeleteSession({js_session_path}, {js_display_name}, this)">Delete</button>
+      onclick='gsDeleteSession({js_session_path}, {js_display_name}, this)'>Delete</button>
   </nav>
 </article>
 """.format(
@@ -997,7 +997,7 @@ a {{ color: #8cc8ff; }}
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
             <button class="action-pill danger-pill" type="button"
-              onclick="gsDeleteSession({js_session_name}, {js_display_name})">Delete Session</button>
+              onclick='gsDeleteSession({js_session_name}, {js_display_name})'>Delete Session</button>
         </div>
     </section>
 

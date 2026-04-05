@@ -28,3 +28,11 @@ sessions/*/
 
 # Temp ZDOTDIR dirs
 /tmp/guild_scroll_zdotdir_*/
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
