@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 import pytest
 from click.testing import CliRunner
 
+import guild_scroll.web.app as webapp
 from guild_scroll.cli import cli
 from guild_scroll.config import SESSION_LOG_NAME, get_sessions_dir
 from guild_scroll.log_schema import SessionMeta
@@ -883,65 +884,101 @@ class TestDeleteSession:
         assert not sess_dir.exists()
 
 
-class TestSessionClose:
-    def test_close_marks_session_finalized(self, isolated_sessions_dir):
+class TestCloseSession:
+    def test_close_removes_session_and_clears_state(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()
         sessions_dir.mkdir(parents=True, exist_ok=True)
-        _make_session(sessions_dir, "closable")
+        _make_session(sessions_dir, "to-close")
+        try:
+            webapp._session_heartbeats["to-close"] = time.monotonic()
+
+            with patch.object(webapp.GuildScrollRequestHandler, "_stop_active_terminal", return_value=True) as stopper:
+                with _running_server() as server:
+                    status, headers, body = _request_post(
+                        server, "/api/session/to-close/close", b""
+                    )
+
+            payload = json.loads(body)
+            assert status == 200
+            assert headers["Content-Type"].startswith("application/json")
+            assert payload["closed"] == "to-close"
+            assert payload["terminal_stopped"] is True
+            assert payload["heartbeat_cleared"] is True
+            assert "to-close" not in webapp._session_heartbeats
+            assert not (sessions_dir / "to-close").exists()
+            stopper.assert_called_once_with("to-close")
+        finally:
+            webapp._session_heartbeats.pop("to-close", None)
+
+    def test_close_oserror_returns_500_and_preserves_state(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "error-session")
+        try:
+            webapp._session_heartbeats["error-session"] = time.monotonic()
+
+            with patch("guild_scroll.web.app.delete_session", side_effect=OSError("disk error")):
+                with _running_server() as server:
+                    status, headers, body = _request_post(
+                        server, "/api/session/error-session/close", b""
+                    )
+
+            payload = json.loads(body)
+            assert status == 500
+            assert headers["Content-Type"].startswith("application/json")
+            assert "error-session" in webapp._session_heartbeats
+        finally:
+            webapp._session_heartbeats.pop("error-session", None)
+
+    def test_close_nonexistent_session_returns_404(self, isolated_sessions_dir):
+        get_sessions_dir().mkdir(parents=True, exist_ok=True)
 
         with _running_server() as server:
             status, headers, body = _request_post(
-                server, "/api/session/closable/close", b""
+                server, "/api/session/missing-session/close", b""
             )
 
         payload = json.loads(body)
-        assert status == 200
+        assert status == 404
         assert headers["Content-Type"].startswith("application/json")
-        assert payload["session"] == "closable"
-        assert payload["finalized"] is True
-        datetime.fromisoformat(payload["end_time"])
-        log_path = sessions_dir / "closable" / "logs" / SESSION_LOG_NAME
-        meta = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
-        assert meta["finalized"] is True
-        assert meta["end_time"] == payload["end_time"]
+        assert "not found" in payload["error"].lower()
 
-    def test_close_invalid_name_returns_400(self, isolated_sessions_dir):
+    def test_close_traversal_returns_400(self, isolated_sessions_dir):
         with _running_server() as server:
-            status, _, body = _request_post(server, "/api/session/../escape/close", b"")
+            status, headers, body = _request_post(
+                server, "/api/session/../escape/close", b""
+            )
 
         payload = json.loads(body)
         assert status == 400
+        assert headers["Content-Type"].startswith("application/json")
         assert payload["error"] == "Invalid session name."
 
-    def test_close_missing_session_returns_404(self, isolated_sessions_dir):
+    def test_index_page_has_close_button(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()
         sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "closeable")
 
         with _running_server() as server:
-            status, _, body = _request_post(server, "/api/session/not-there/close", b"")
+            status, _, body = _request(server, "/")
 
-        payload = json.loads(body)
-        assert status == 404
-        assert payload["error"] == "Session not found"
+        content = body.decode("utf-8")
+        assert status == 200
+        assert "Close" in content
+        assert "gsCloseSession" in content
 
-    def test_close_clears_live_heartbeat(self, isolated_sessions_dir):
+    def test_session_page_has_close_button(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()
         sessions_dir.mkdir(parents=True, exist_ok=True)
-        _make_session(sessions_dir, "live-one")
+        _make_session(sessions_dir, "close-ui")
 
         with _running_server() as server:
-            _request_post(server, "/api/session/live-one/heartbeat", b"")
-            status_live, _, body_live = _request(server, "/api/session/live-one/heartbeat")
-            payload_live = json.loads(body_live)
-            assert payload_live["status"] == "live"
+            status, _, body = _request(server, "/session/close-ui")
 
-            status_close, _, _ = _request_post(server, "/api/session/live-one/close", b"")
-            assert status_close == 200
-
-            status_after, _, body_after = _request(server, "/api/session/live-one/heartbeat")
-            payload_after = json.loads(body_after)
-            assert status_after == 200
-            assert payload_after["status"] == "unknown"
+        content = body.decode("utf-8")
+        assert status == 200
+        assert "Close Session" in content
+        assert "gsCloseSession" in content
 
 
 # ── PNG/JPEG magic bytes for test payloads ────────────────────────────────────
