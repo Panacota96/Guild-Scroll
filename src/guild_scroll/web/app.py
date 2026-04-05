@@ -418,6 +418,8 @@ def _render_index_page(sessions: list[dict]) -> str:
             escaped_name = html.escape(name)
             js_session_path = json.dumps(quoted_name)
             js_display_name = json.dumps(name)
+            html_js_session_path = html.escape(js_session_path)
+            html_js_display_name = html.escape(js_display_name)
             card_items.append(
                 """
 <article class="session-card" data-name="{data_name}" data-start="{data_start}"
@@ -436,7 +438,7 @@ def _render_index_page(sessions: list[dict]) -> str:
     <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
     <button class="rune-link danger-link" type="button"
-      onclick='gsDeleteSession({js_session_path}, {js_display_name}, this)'>Delete</button>
+      onclick="gsDeleteSession({html_js_session_path}, {html_js_display_name}, this)">Delete</button>
   </nav>
 </article>
 """.format(
@@ -445,8 +447,8 @@ def _render_index_page(sessions: list[dict]) -> str:
                     hostname=html.escape(hostname),
                     command_count=command_count,
                     session_path=quoted_name,
-                    js_session_path=js_session_path,
-                    js_display_name=js_display_name,
+                    html_js_session_path=html_js_session_path,
+                    html_js_display_name=html_js_display_name,
                     data_name=html.escape(name.lower()),
                     data_start=html.escape(raw_start),
                     data_host=html.escape(raw_host),
@@ -997,7 +999,7 @@ a {{ color: #8cc8ff; }}
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
             <button class="action-pill danger-pill" type="button"
-              onclick='gsDeleteSession({js_session_name}, {js_display_name})'>Delete Session</button>
+              onclick="gsDeleteSession({html.escape(js_session_name)}, {html.escape(js_display_name)})">Delete Session</button>
         </div>
     </section>
 

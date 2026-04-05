@@ -128,9 +128,10 @@ export const test = base.extend({
       } else if (!env.PYTHONPATH.includes(path.join(process.cwd(), 'src'))) {
         env.PYTHONPATH = `${path.join(process.cwd(), 'src')}:${env.PYTHONPATH}`;
       }
+      const python = process.env.PYTHON || (os.platform() === 'win32' ? 'python' : 'python3');
       serverProc = spawn(
-        'gscroll',
-        ['serve', '--host', '127.0.0.1', '--port', String(port)],
+        python,
+        ['-m', 'guild_scroll', 'serve', '--host', '127.0.0.1', '--port', String(port)],
         { env, stdio: ['ignore', 'pipe', 'pipe'] },
       );
       await waitForServer(serverProc);
@@ -143,15 +144,25 @@ export const test = base.extend({
       }
       const proc = serverProc;
       serverProc = undefined;
+
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        return;
+      }
+
       await new Promise((resolve) => {
-        proc.once('exit', () => resolve());
-        proc.kill('SIGTERM');
-        setTimeout(() => {
-          if (!proc.killed) {
+        const onExit = () => {
+          clearTimeout(forceKillTimer);
+          resolve();
+        };
+
+        const forceKillTimer = setTimeout(() => {
+          if (proc.exitCode === null && proc.signalCode === null) {
             proc.kill('SIGKILL');
           }
-          resolve();
         }, 5000);
+
+        proc.once('exit', onExit);
+        proc.kill('SIGTERM');
       });
     };
 
