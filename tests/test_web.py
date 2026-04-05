@@ -888,24 +888,46 @@ class TestCloseSession:
         sessions_dir = get_sessions_dir()
         sessions_dir.mkdir(parents=True, exist_ok=True)
         _make_session(sessions_dir, "to-close")
-        webapp._session_heartbeats["to-close"] = time.monotonic()
+        try:
+            webapp._session_heartbeats["to-close"] = time.monotonic()
 
-        with patch.object(webapp.GuildScrollRequestHandler, "_stop_active_terminal", return_value=True) as stopper:
-            with _running_server() as server:
-                status, headers, body = _request_post(
-                    server, "/api/session/to-close/close", b""
-                )
+            with patch.object(webapp.GuildScrollRequestHandler, "_stop_active_terminal", return_value=True) as stopper:
+                with _running_server() as server:
+                    status, headers, body = _request_post(
+                        server, "/api/session/to-close/close", b""
+                    )
 
-        payload = json.loads(body)
-        assert status == 200
-        assert headers["Content-Type"].startswith("application/json")
-        assert payload["closed"] == "to-close"
-        assert payload["terminal_stopped"] is True
-        assert payload["heartbeat_cleared"] is True
-        assert "to-close" not in webapp._session_heartbeats
-        assert not (sessions_dir / "to-close").exists()
-        stopper.assert_called_once_with("to-close")
-        webapp._session_heartbeats.clear()
+            payload = json.loads(body)
+            assert status == 200
+            assert headers["Content-Type"].startswith("application/json")
+            assert payload["closed"] == "to-close"
+            assert payload["terminal_stopped"] is True
+            assert payload["heartbeat_cleared"] is True
+            assert "to-close" not in webapp._session_heartbeats
+            assert not (sessions_dir / "to-close").exists()
+            stopper.assert_called_once_with("to-close")
+        finally:
+            webapp._session_heartbeats.pop("to-close", None)
+
+    def test_close_oserror_returns_500_and_preserves_state(self, isolated_sessions_dir):
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, "error-session")
+        try:
+            webapp._session_heartbeats["error-session"] = time.monotonic()
+
+            with patch("guild_scroll.web.app.delete_session", side_effect=OSError("disk error")):
+                with _running_server() as server:
+                    status, headers, body = _request_post(
+                        server, "/api/session/error-session/close", b""
+                    )
+
+            payload = json.loads(body)
+            assert status == 500
+            assert headers["Content-Type"].startswith("application/json")
+            assert "error-session" in webapp._session_heartbeats
+        finally:
+            webapp._session_heartbeats.pop("error-session", None)
 
     def test_close_nonexistent_session_returns_404(self, isolated_sessions_dir):
         get_sessions_dir().mkdir(parents=True, exist_ok=True)

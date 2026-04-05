@@ -1492,9 +1492,6 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Session not found"}, status=404)
             return
 
-        terminal_stopped = self._stop_active_terminal(session_name)
-        with _heartbeats_lock:
-            heartbeat_cleared = _session_heartbeats.pop(session_name, None) is not None
         try:
             delete_session(session_name)
         except FileNotFoundError:
@@ -1506,6 +1503,9 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         except OSError as exc:
             self._send_json({"error": f"Could not close session: {exc}"}, status=500)
             return
+        terminal_stopped = self._stop_active_terminal(session_name)
+        with _heartbeats_lock:
+            heartbeat_cleared = _session_heartbeats.pop(session_name, None) is not None
         self._send_json(
             {
                 "closed": session_name,
