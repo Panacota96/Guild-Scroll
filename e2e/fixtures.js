@@ -125,8 +125,12 @@ export const test = base.extend({
       };
       if (!env.PYTHONPATH) {
         env.PYTHONPATH = path.join(process.cwd(), 'src');
-      } else if (!env.PYTHONPATH.includes(path.join(process.cwd(), 'src'))) {
-        env.PYTHONPATH = `${path.join(process.cwd(), 'src')}:${env.PYTHONPATH}`;
+      } else {
+        const srcPath = path.join(process.cwd(), 'src');
+        const pythonPathEntries = env.PYTHONPATH.split(path.delimiter);
+        if (!pythonPathEntries.includes(srcPath)) {
+          env.PYTHONPATH = [srcPath, ...pythonPathEntries].join(path.delimiter);
+        }
       }
       const python = process.env.PYTHON || (os.platform() === 'win32' ? 'python' : 'python3');
       serverProc = spawn(

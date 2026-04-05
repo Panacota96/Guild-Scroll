@@ -1,7 +1,7 @@
 {
   "name": "guild-scroll",
   "version": "1.0.0",
-  "description": "<div align=\"center\">",
+  "description": "Playwright end-to-end test tooling for Guild Scroll",
   "main": "index.js",
   "directories": {
     "doc": "docs",
