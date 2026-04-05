@@ -155,13 +155,14 @@ export const test = base.extend({
           resolve();
         };
 
+        proc.once('exit', onExit);
+
         const forceKillTimer = setTimeout(() => {
           if (proc.exitCode === null && proc.signalCode === null) {
             proc.kill('SIGKILL');
           }
         }, 5000);
 
-        proc.once('exit', onExit);
         proc.kill('SIGTERM');
       });
     };
