@@ -443,9 +443,9 @@ def _render_index_page(sessions: list[dict]) -> str:
     <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
     <button class="rune-link danger-link" type="button"
-      onclick="gsCloseSession({js_session_path}, {js_display_name}, this)">Close</button>
+      onclick="gsCloseSession({html_js_session_path}, {html_js_display_name}, this)">Close</button>
     <button class="rune-link danger-link" type="button"
-      onclick="gsDeleteSession({js_session_path}, {js_display_name}, this)">Delete</button>
+      onclick="gsDeleteSession({html_js_session_path}, {html_js_display_name}, this)">Delete</button>
   </nav>
 </article>
 """.format(
