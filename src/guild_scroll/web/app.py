@@ -416,8 +416,8 @@ def _render_index_page(sessions: list[dict]) -> str:
             command_count = _format_command_count(session.get("command_count"))
             quoted_name = quote(name, safe="")
             escaped_name = html.escape(name)
-            js_session_path = json.dumps(quoted_name)
-            js_display_name = json.dumps(name)
+            js_session_path = html.escape(json.dumps(quoted_name), quote=True)
+            js_display_name = html.escape(json.dumps(name), quote=True)
             card_items.append(
                 """
 <article class="session-card" data-name="{data_name}" data-start="{data_start}"
@@ -921,6 +921,8 @@ def _render_session_page(
         session_name = quote(session.meta.session_name)
         js_session_name = json.dumps(session_name)
         js_display_name = json.dumps(session.meta.session_name)
+        onclick_session_name = html.escape(js_session_name, quote=True)
+        onclick_display_name = html.escape(js_display_name, quote=True)
         preview_count = len(discoveries["timeline"])
         total_discoveries = len(discoveries["notes"]) + len(discoveries["assets"])
 
@@ -1013,9 +1015,9 @@ a {{ color: #8cc8ff; }}
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
             <button class="action-pill danger-pill" type="button"
-              onclick="gsCloseSession({js_session_name}, {js_display_name})">Close Session</button>
+              onclick="gsCloseSession({onclick_session_name}, {onclick_display_name})">Close Session</button>
             <button class="action-pill danger-pill" type="button"
-              onclick="gsDeleteSession({js_session_name}, {js_display_name})">Delete Session</button>
+              onclick="gsDeleteSession({onclick_session_name}, {onclick_display_name})">Delete Session</button>
         </div>
     </section>
 
