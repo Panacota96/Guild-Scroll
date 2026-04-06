@@ -334,8 +334,36 @@ class TestCRUDEndpoints:
             status, data = _request(server, "POST", "/api/session/cont-sess/continue")
             assert status == 200
             payload = json.loads(data)
+            assert payload["session"] == "cont-sess"
+            assert payload["status"] == "active"
             assert payload["part"] >= 2
+
+            status_get, data_get = _request(server, "GET", "/api/session/cont-sess")
+            assert status_get == 200
+            meta = json.loads(data_get)["session"]
+            assert meta.get("parts_count") >= payload["part"]
         finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_continue_session_conflict_when_active(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "cont-live")
+        server, thread = _start_test_server()
+        part = None
+        try:
+            status_first, data_first = _request(server, "POST", "/api/session/cont-live/continue")
+            assert status_first == 200
+            part = json.loads(data_first)["part"]
+
+            status_second, data_second = _request(server, "POST", "/api/session/cont-live/continue")
+            assert status_second == 409
+            payload_second = json.loads(data_second)
+            assert "active" in payload_second.get("error", "").lower()
+        finally:
+            if part:
+                _request(server, "POST", f"/api/session/cont-live/terminal/stop?part={part}")
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)

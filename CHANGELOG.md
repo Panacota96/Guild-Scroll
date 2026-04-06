@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 ### Added
 
 - **Web terminal capture** — WebSocket `/ws/session/{name}/terminal` now streams browser keystrokes to the PTY and logs each newline-delimited command as a `CommandEvent` (with cwd, seq, and part) into `session.jsonl`. Live terminal UI added to session pages with REST fallbacks for start/read/write/stop.
+- **Continue session (web)** — `POST /api/session/{name}/continue` now starts a joined part with active-terminal guard, returns `{session, part, status}`, updates `parts_count`, and is exposed via a Continue button on session pages.
 
 ---
 

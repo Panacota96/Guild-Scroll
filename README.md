@@ -46,7 +46,7 @@ gscroll export --format md   # structured report, ready to share
 | **Validation** | `gscroll validate [SESSION] --repair` checks JSONL/assets/parts and patches repairable metadata |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
-| **Web preview** | `gscroll serve` hosts an HTML viewer + JSON API with full session CRUD (`POST /api/sessions`, `DELETE`, `continue`, `validate`) |
+| **Web preview** | `gscroll serve` hosts an HTML viewer + JSON API with session CRUD (create, delete, continue with part tracking, validate) |
 | **Session auto-detect** | All sub-commands pick up `GUILD_SCROLL_SESSION` automatically |
 | **Self-update** | `gscroll update` checks GitHub and reinstalls |
 
@@ -366,7 +366,7 @@ Set `GUILD_SCROLL_ALLOW_REMOTE=1` to allow the report server to bind to non-loca
 | `GET` | `/api/session/{name}` | Fetch session detail (commands, notes, assets) |
 | `POST` | `/api/sessions` | Create a session scaffold (`{"name": "..."}`) → 201/409/422 |
 | `DELETE` | `/api/session/{name}` | Delete a session directory → 204/404/400 |
-| `POST` | `/api/session/{name}/continue` | Scaffold a new session part → `{"part": N}` |
+| `POST` | `/api/session/{name}/continue` | Start a joined session part → `{"session": "...", "part": N, "status": "active"}` (404 if missing, 409 if already active) |
 | `POST` | `/api/session/{name}/validate` | Validate (and optionally repair with `?repair=true`) → `{valid, errors, warnings, repaired}` |
 | `POST` | `/api/session/{name}/report` | Render a filtered export (body: `{"format": "md\|html", ...}`) |
 | `GET` | `/api/session/{name}/download` | Download session export (`?format=md\|html`) |
@@ -377,6 +377,7 @@ Set `GUILD_SCROLL_ALLOW_REMOTE=1` to allow the report server to bind to non-loca
 - Session pages include an **Open Terminal** panel that POSTs `/api/session/{name}/terminal/start` and streams over WebSocket `/ws/session/{name}/terminal`.
 - Each newline-delimited stdin message is logged to `session.jsonl` as a `CommandEvent` (with cwd, seq, and part) before being forwarded to the PTY; terminal output is mirrored to `terminal.log`.
 - REST fallbacks are available for polling and automation: `GET /api/session/{name}/terminal/read`, `POST /api/session/{name}/terminal/write`, and `POST /api/session/{name}/terminal/stop`.
+- A **Continue Session** action starts a new part from the session page and updates the live terminal to target the new part.
 
 ### JSONL Event Types
 
