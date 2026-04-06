@@ -64,7 +64,6 @@ class TestStatusCommand:
         result = runner.invoke(cli, ["status"])
         assert result.exit_code == 0
         assert "live-box" in result.output
-        assert "[REC]" in result.output
 
 
 class TestStartCommand:
@@ -75,23 +74,6 @@ class TestStartCommand:
             result = runner.invoke(cli, ["start", "test-session"])
         assert result.exit_code == 0
         assert "test-session" in result.output
-        assert "[REC] Starting session 'test-session'" in result.output
-        assert mock_rec.call_count == 1
-        assert mock_rec.call_args.kwargs["session_name"] == "test-session"
-
-    def test_start_join_shows_rec_indicator(self, isolated_sessions_dir):
-        from guild_scroll.config import get_sessions_dir
-        sessions_dir = get_sessions_dir()
-        sessions_dir.mkdir(parents=True, exist_ok=True)
-        _make_session(sessions_dir, "test-session")
-        runner = CliRunner()
-        with patch("guild_scroll.session.start_recording") as mock_rec:
-            mock_rec.return_value = 0
-            result = runner.invoke(cli, ["start", "test-session", "--join"])
-        assert result.exit_code == 0
-        assert "[REC] Joining session 'test-session'" in result.output
-        assert mock_rec.call_count == 1
-        assert mock_rec.call_args.kwargs["session_name"] == "test-session"
 
 
 class TestVersionFlag:
@@ -99,7 +81,7 @@ class TestVersionFlag:
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.13.0" in result.output
+        assert "0.5.0" in result.output
 
 
 class TestUpdateCommand:
@@ -291,26 +273,8 @@ class TestExportCommand:
         content = out.read_text(encoding="utf-8")
         assert "Executive Summary" in content
 
-    def test_export_html_writeup_mode(self, isolated_sessions_dir, tmp_path):
-        from guild_scroll.config import get_sessions_dir
-        sessions_dir = get_sessions_dir()
-        sessions_dir.mkdir(parents=True, exist_ok=True)
-        _make_session(sessions_dir, "writeup-html-sess")
 
-        out = tmp_path / "writeup.html"
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            ["export", "writeup-html-sess", "--format", "html", "--writeup", "-o", str(out)],
-        )
-        assert result.exit_code == 0
-        assert out.exists()
-        content = out.read_text(encoding="utf-8")
-        assert "Executive Summary" in content
-        assert "Findings" in content
-        assert "Remediation" in content
-
-
+class TestReplayCommand:
     def test_missing_session_errors(self, isolated_sessions_dir):
         runner = CliRunner()
         result = runner.invoke(cli, ["replay", "no-such-session"])
@@ -473,68 +437,3 @@ class TestValidateCommand:
         assert "+ repaired:" in result.output
         assert repaired_meta["command_count"] == 1
         assert repaired_meta["end_time"] == "2026-04-02T13:30:03Z"
-
-
-class TestFinalizeCommand:
-    def test_finalize_sets_finalized_flag(self, isolated_sessions_dir):
-        from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
-        sessions_dir = get_sessions_dir()
-        sessions_dir.mkdir(parents=True, exist_ok=True)
-        _make_session(sessions_dir, "fin-sess")
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["finalize", "fin-sess"])
-        assert result.exit_code == 0
-        assert "finalized" in result.output
-
-        log_file = sessions_dir / "fin-sess" / "logs" / SESSION_LOG_NAME
-        meta = json.loads(log_file.read_text().splitlines()[0])
-        assert meta["finalized"] is True
-
-    def test_finalize_with_result(self, isolated_sessions_dir):
-        from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
-        sessions_dir = get_sessions_dir()
-        sessions_dir.mkdir(parents=True, exist_ok=True)
-        _make_session(sessions_dir, "fin-result-sess")
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["finalize", "fin-result-sess", "--result", "rooted"])
-        assert result.exit_code == 0
-        assert "rooted" in result.output
-
-        log_file = sessions_dir / "fin-result-sess" / "logs" / SESSION_LOG_NAME
-        meta = json.loads(log_file.read_text().splitlines()[0])
-        assert meta["finalized"] is True
-        assert meta["result"] == "rooted"
-
-    def test_finalize_invalid_result_fails(self, isolated_sessions_dir):
-        from guild_scroll.config import get_sessions_dir
-        sessions_dir = get_sessions_dir()
-        sessions_dir.mkdir(parents=True, exist_ok=True)
-        _make_session(sessions_dir, "bad-result-sess")
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["finalize", "bad-result-sess", "--result", "invalid"])
-        assert result.exit_code != 0
-
-    def test_finalize_missing_session_errors(self, isolated_sessions_dir):
-        runner = CliRunner()
-        result = runner.invoke(cli, ["finalize", "no-such-session"])
-        assert result.exit_code != 0
-        assert "Session not found" in result.output
-
-    def test_finalize_auto_detect_session(self, isolated_sessions_dir, monkeypatch):
-        from guild_scroll.config import get_sessions_dir, SESSION_LOG_NAME
-        sessions_dir = get_sessions_dir()
-        sessions_dir.mkdir(parents=True, exist_ok=True)
-        _make_session(sessions_dir, "auto-fin-sess")
-        monkeypatch.setenv("GUILD_SCROLL_SESSION", "auto-fin-sess")
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["finalize", "--result", "partial"])
-        assert result.exit_code == 0
-
-        log_file = sessions_dir / "auto-fin-sess" / "logs" / SESSION_LOG_NAME
-        meta = json.loads(log_file.read_text().splitlines()[0])
-        assert meta["finalized"] is True
-        assert meta["result"] == "partial"

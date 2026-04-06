@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.13.0-green)
+![Version](https://img.shields.io/badge/version-0.5.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -13,7 +13,7 @@
 
 Guild Scroll wraps your terminal with `script` and zsh hooks to capture every command, output, and asset into structured JSONL logs — so you can replay, search, export, and report without manual note-taking.
 
-[Installation](#installation) · [Quick Start](#quick-start) · [Deployment Modes](docs/docker/deployment-modes.md) · [Process Diagrams](docs/context-engineering/process-diagrams.md) · [Codebase Guide](#codebase-guide) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Installation](#installation) · [Quick Start](#quick-start) · [Deployment Modes](docs/docker/deployment-modes.md) · [Codebase Guide](#codebase-guide) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 </div>
 
@@ -42,13 +42,11 @@ gscroll export --format md   # structured report, ready to share
 | **MITRE ATT&CK** | Each tool mapped to a MITRE technique ID |
 | **Annotations** | Timestamped notes and tags, mid-session or post-session |
 | **Export** | Markdown report, self-contained HTML, live web previews/downloads, asciicast v2 (`.cast`) |
-| **Search** | `gscroll search --tool nmap --phase recon --exit-code 0 --output-contains 'open'` |
+| **Search** | `gscroll search --tool nmap --phase recon --exit-code 0` |
 | **Validation** | `gscroll validate [SESSION] --repair` checks JSONL/assets/parts and patches repairable metadata |
-| **Signing** | `gscroll sign [SESSION] [--key KEYFILE]` creates a chain-of-trust signature (`session.sig`) |
-| **Verification** | `gscroll verify [SESSION] [--key KEYFILE]` verifies integrity; exits non-zero on mismatch |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
-| **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API; sessions can be closed from the index or detail pages to stop live terminals/heartbeats and remove the run; drag-and-drop asset uploads, session heartbeat tracking, and an integrated zsh terminal are available from the session detail page |
+| **Web preview** | `gscroll serve` hosts an HTML viewer + JSON API with full session CRUD (`POST /api/sessions`, `DELETE`, `continue`, `validate`) |
 | **Session auto-detect** | All sub-commands pick up `GUILD_SCROLL_SESSION` automatically |
 | **Self-update** | `gscroll update` checks GitHub and reinstalls |
 
@@ -56,55 +54,28 @@ gscroll export --format md   # structured report, ready to share
 
 ## Architecture
 
-<!-- visual: architecture-overview | last-updated: v0.13.0 (2026-04) | update-when: module structure or layer boundaries change -->
-The three layers interact as follows: the **Shell & Recorder** layer captures raw I/O and structured events, the **Core** layer loads and enriches session data, and the **Surfaces** layer exposes that data through the CLI, exporters, TUI, web viewer, and replay tools.
-
 ```mermaid
-graph LR
-    subgraph "Shell & Recorder"
-        start["gscroll start"] --> hooks["Hook injector\n(zsh/bash preexec/precmd)"]
-        hooks --> script["script process\nraw_io.log + timing.log"]
-        hooks --> events["Event stream\nsession.jsonl"]
+graph TD
+    A["gscroll start"] -->|"launches script + injects zsh hooks"| B["script process\n(raw_io.log + timing.log)"]
+    A --> C["JSONL log\n(session.jsonl)"]
+
+    subgraph "Per-command (zsh preexec/precmd)"
+        D["CommandEvent"] --> C
+        E["AssetEvent"] --> C
+        F["NoteEvent"] --> C
     end
 
-    subgraph "Core"
-        loader["session_loader.py\nLoadedSession + indexes"]
-        schema["log_schema.py\nJSONL event types"]
-        enrich["asset_detector.py + tool_tagger.py\nauto-label + detect assets"]
-        integrity["validator.py + integrity.py\nHMAC, encryption, signing"]
-    end
-
-    events --> loader
-    schema --> loader
-    loader --> enrich
-    enrich --> loader
-    loader --> integrity
-
-    subgraph "Surfaces"
-        cli["cli.py\nClick commands"]
-        exporters["exporters/\nmd | html | cast | obsidian"]
-        tui["tui/\nTextual dashboard"]
-        web["web.py + web/\nlocal viewer + API"]
-        replay["replay.py\nscriptreplay wrapper"]
-        sharing["sharing.py\narchive + uploads"]
-        updater["updater.py\nself-update"]
-    end
-
-    loader --> exporters
-    loader --> tui
-    loader --> web
-    loader --> replay
-    loader --> sharing
-    loader --> updater
-    cli --> start
+    B --> G["gscroll replay\n(scriptreplay)"]
+    C --> H["session_loader.py\n(LoadedSession)"]
+    H --> I["gscroll export\n(md / html / cast)"]
+    H --> J["gscroll search\n(SearchFilter)"]
+    H --> K["gscroll tui\n(Textual TUI)"]
+    H --> L["gscroll writeup\n(Claude SDK — M5)"]
 ```
 
 ---
 
 ## Session Data Flow
-
-<!-- visual: session-data-flow | last-updated: v0.13.0 (2026-04) | update-when: recording pipeline or hook API changes -->
-This sequence diagram traces a single working session from `gscroll start` through command execution to final export, showing how each participant hands off to the next.
 
 ```mermaid
 sequenceDiagram
@@ -135,29 +106,8 @@ sequenceDiagram
 
 ---
 
-## Recording Lifecycle
-
-<!-- visual: recording-lifecycle | last-updated: v0.13.0 (2026-04) | update-when: session start/finalize/export pipeline changes -->
-The flowchart below traces a session from creation through enrichment, signing, and at-rest encryption to the final output surfaces (exports, TUI, web, replay).
-
-```mermaid
-flowchart TD
-    start([Start session]) --> hook[Inject shell hook\nset GUILD_SCROLL_SESSION]
-    hook --> record[Record raw terminal I/O\nscript -> raw_io.log + timing.log]
-    hook --> events[Write session_meta + per-command events\nsession.jsonl]
-    events --> enrich[Enrich events\nasset detection + tool tagging]
-    enrich --> secure[Validate, sign, encrypt on finalize\nsession.sig + enc files]
-    record --> load[Load session\nsession_loader.py]
-    secure --> load
-    load --> surfaces[[Exports / Search / Replay / TUI / Web]]
-    surfaces --> outputs([Reports, downloads, API responses])
-```
-
----
-
 ## Multi-Session Flow *(M4)*
 
-<!-- visual: multi-session-flow | last-updated: v0.13.0 (2026-04) | update-when: gscroll join / multi-part merge logic changes -->
 For scenarios with multiple concurrent terminals (e.g. attacker shell + reverse shell listener):
 
 ```mermaid
@@ -168,106 +118,6 @@ graph LR
     S -->|"gscroll join"| M["Merged timeline\n(by timestamp)"]
     M --> E["Export / TUI / Writeup"]
 ```
-
----
-
-## CLI Command Overview
-
-Every `gscroll` sub-command and its key options at a glance.
-
-```mermaid
-mindmap
-  root((gscroll))
-    start
-      NAME
-      --mode ctf | assessment
-    list
-    status
-    note
-      SESSION
-      TEXT
-      --tag TAG
-    export
-      SESSION
-      --format md | html | cast
-      --writeup
-      -o PATH
-    search
-      SESSION
-      --tool TOOL
-      --phase PHASE
-      --exit-code CODE
-      --cwd DIR
-      --output-contains TEXT
-    replay
-      SESSION
-      --speed FLOAT
-    validate
-      SESSION
-      --repair
-    sign
-      SESSION
-      --key KEYFILE
-    verify
-      SESSION
-      --key KEYFILE
-    finalize
-      SESSION
-      --result rooted | compromised | partial | failed | incomplete
-    tui
-      SESSION
-    serve
-      --host HOST
-      --port PORT
-      --tls-cert FILE
-      --tls-key FILE
-    update
-```
-
----
-
-## Session Lifecycle State Machine
-
-The states a session moves through from `gscroll start` to archival.
-
-```mermaid
-stateDiagram-v2
-    [*] --> Active : gscroll start
-    Active --> Active : command logged\nnote added\nasset captured
-    Active --> Validated : gscroll validate
-    Validated --> Active : --repair applied
-    Active --> Finalized : gscroll finalize
-    Finalized --> Signed : gscroll sign
-    Signed --> Verified : gscroll verify ✅
-    Signed --> Tampered : gscroll verify ❌
-    Active --> Exported : gscroll export
-    Finalized --> Exported : gscroll export
-    Signed --> Exported : gscroll export
-    Active --> Replayed : gscroll replay
-    Finalized --> Encrypted : AES-256-GCM\nauto on finalize v0.13+
-    Encrypted --> Exported : transparent decrypt
-```
-
----
-
-## Export Pipeline
-
-How `session.jsonl` and raw I/O logs are transformed into each output format.
-
-```mermaid
-flowchart LR
-    jsonl["session.jsonl\nJSONL events"] --> loader["session_loader.py\nLoadedSession"]
-    raw["raw_io.log\nRaw terminal I/O"] --> loader
-    loader --> enrich["Enrichment\nasset_detector + tool_tagger"]
-    enrich --> md_exp["markdown.py\n→ report.md / writeup.md"]
-    enrich --> html_exp["html.py\n→ self-contained report.html"]
-    enrich --> cast_exp["cast.py\n→ session.cast\nasciicast v2"]
-    enrich --> obs_exp["obsidian.py\n→ vault note"]
-    enrich --> tui_exp["tui/\n→ Textual dashboard"]
-    enrich --> web_exp["web/\n→ localhost viewer & API"]
-```
-
-> **Full diagram reference:** [docs/diagrams.md](docs/diagrams.md) — includes the JSONL data model, security and integrity flow, module dependency map, and all the above diagrams with additional detail.
 
 ---
 
@@ -393,11 +243,8 @@ See [DOCKER.md](DOCKER.md) for full Docker + Kubernetes guide, including trouble
 ## Quick Start
 
 ```bash
-# Start a new session ([REC] shown in startup output and prompt)
+# Start a new session
 gscroll start htb-machine
-
-# Check active recording status (shows [REC] when active)
-gscroll status
 
 # Add a note (auto-detects active session inside a recording)
 gscroll note "found open port 80 — Apache 2.4" --tag recon
@@ -405,30 +252,14 @@ gscroll note "found open port 80 — Apache 2.4" --tag recon
 # Search commands
 gscroll search --phase recon
 gscroll search --tool nmap --exit-code 0
-gscroll search --output-contains "80/tcp open"
-gscroll search --tool nmap --output-contains "open"
 
 # Validate integrity and repair session metadata
 gscroll validate htb-machine --repair
-
-# Sign a session (SHA-256 integrity baseline)
-gscroll sign htb-machine
-
-# Sign with a shared-secret key (HMAC-SHA256, for operator workflows / CI)
-gscroll sign htb-machine --key operator.key
-
-# Verify before sharing/reporting
-gscroll verify htb-machine
-gscroll verify htb-machine --key operator.key   # exits 1 on mismatch
 
 # Export
 gscroll export --format md
 gscroll export --format html -o report.html
 gscroll export --format cast          # asciicast (asciinema-compatible)
-
-# Structured CPTS-style writeup reports
-gscroll export --format md --writeup                    # Markdown writeup with all sections
-gscroll export --format html --writeup -o report.html  # Responsive HTML writeup
 
 # Replay
 gscroll replay
@@ -443,39 +274,8 @@ gscroll serve
 # List all sessions
 gscroll list
 
-# Finalize a session and record the outcome
-gscroll finalize htb-machine --result rooted
-gscroll finalize htb-machine --result compromised
-
 # Update to latest
 gscroll update
-```
-
-Use the **Close Session** button in the Session Codex or on a session's detail page to stop any live terminal/heartbeat and remove a lingering session without touching the CLI.
-
-### Recording Indicator
-
-`gscroll` keeps a persistent recording indicator in your interactive shell prompt while a session is active.
-It is injected by the shell hook loaded during `gscroll start` and is removed automatically when you exit that recording shell.
-
-1. `gscroll start <name>` launches a wrapped shell with hook injection.
-2. The hook prepends a marker and the session name to your prompt on every command.
-3. Exiting that shell removes the indicator because the hook environment ends with the session.
-
-- Called by: `gscroll start` (via `session.start_session()` and hook generation)
-- Calls: zsh `PROMPT` / bash `PS1` prompt updates in `guild_scroll.hooks`
-- Reads: `GUILD_SCROLL_SESSION`, optional `GUILD_SCROLL_REC_MARKER`
-- Writes: interactive prompt decoration, `gscroll status` output
-
-```bash
-# Default marker
-gscroll start htb-machine
-# prompt shows: [REC] htb-machine ...
-
-# Optional custom marker for theme compatibility
-export GUILD_SCROLL_REC_MARKER="⏺ REC"
-gscroll start htb-machine
-# prompt shows: ⏺ REC htb-machine ...
 ```
 
 ---
@@ -488,73 +288,9 @@ gscroll start htb-machine
 4. `gscroll note` appends a `NoteEvent` to the log at any point.
 5. `gscroll export` loads all events, auto-tags each command by security phase, and renders the chosen format.
 
-> Detailed process diagrams for the export pipeline, encryption lifecycle, integrity chain, web server routing, and security modes are in [docs/context-engineering/process-diagrams.md](docs/context-engineering/process-diagrams.md).
-
 ---
 
-## Writeup Workflow
-
-`--writeup` generates a structured, client-facing pentest report aligned with CPTS-style outputs:
-
-```bash
-# Markdown writeup — all sections, ready to fill in findings
-gscroll export htb-machine --format md --writeup
-
-# Self-contained HTML writeup — responsive layout, desktop and mobile
-gscroll export htb-machine --format html --writeup -o report.html
-```
-
-Both formats include:
-
-| Section | Content |
-|---|---|
-| **Executive Summary** | Approach, Scope table, Assessment overview |
-| **Assessment Summary** | Command counts and tools-used table |
-| **Walkthrough** | Step-by-step narrative (first 15 commands) |
-| **Reproducibility Steps** | Full command sequence for customer replay |
-| **Rabbit Holes / Dead Ends** | Commands with non-zero exit codes |
-| **Findings** | Full command table with phase tags |
-| **Remediation** | Short-, medium-, and long-term priorities |
-| **Appendix** | Notes and captured command output evidence |
-
-<!-- visual: export-workflow | last-updated: v0.13.0 (2026-04) | update-when: exporter list or --writeup flag logic changes -->
-The diagram below shows how a loaded session flows through each exporter. The `--writeup` flag activates additional structured sections in the Markdown and HTML outputs.
-
-```mermaid
-flowchart LR
-    session[("session.jsonl\nraw_io.log")] --> loader["session_loader.py\nLoadedSession"]
-    loader --> md["markdown.py\n→ report.md"]
-    loader --> html["html.py\n→ report.html"]
-    loader --> cast["cast.py\n→ session.cast"]
-    loader --> obs["obsidian.py\n→ vault note"]
-    md -->|"--writeup"| writeup["Structured writeup\nCPTS-style sections"]
-    html -->|"--writeup"| writeuphtml["Self-contained HTML\nwriteup"]
-```
-
----
-
-## Finalize Workflow
-
-Mark a session as complete and record its outcome for reporting:
-
-```bash
-# Record the engagement result (rooted, compromised, partial, failed, or incomplete)
-gscroll finalize htb-machine --result rooted
-
-# Finalize without a result (marks as complete but leaves result unset)
-gscroll finalize htb-machine
-
-# Auto-detected inside a recording session
-gscroll finalize --result partial
-```
-
-Once finalized, the `finalized: true` and `result` fields are persisted in the session JSONL log and surfaced in all export formats (Markdown header, HTML meta, and writeup scope table).
-
-Valid result values: `rooted`, `compromised`, `partial`, `failed`, `incomplete`.
-
----
-
-## Technical Stack
+## Tech Stack
 
 | Area | Implementation |
 |---|---|
@@ -571,40 +307,6 @@ Valid result values: `rooted`, `compromised`, `partial`, `failed`, `incomplete`.
 
 ## Codebase Guide
 
-### Repository Map
-
-<!-- visual: repository-map | last-updated: v0.13.0 (2026-04) | update-when: new top-level modules or major directory changes -->
-The diagram below maps the repository's top-level structure to its logical layers. Follow the arrows from the repo root to see which directories own the core runtime, exporters, user interfaces, tests, and documentation.
-
-```mermaid
-graph TD
-    repo["Guild Scroll repo"] --> core["Core runtime\nsrc/guild_scroll/"]
-    core --> cli["cli.py\nClick entry + command wiring"]
-    core --> record["session.py / recorder.py / hooks.py\nstart/finalize + hook injection"]
-    core --> model["log_schema.py / log_writer.py\nJSONL event model + writers"]
-    core --> enrich["analysis.py / search.py / asset_detector.py / tool_tagger.py\nmetadata + tagging"]
-    core --> integrity["validator.py / integrity.py / merge.py\nHMAC, repair, join parts"]
-    core --> services["server.py / platform_detect.py / updater.py\nsupporting services"]
-
-    repo --> exporters["Exporters\nsrc/guild_scroll/exporters/"]
-    exporters --> md["markdown.py\nreports + writeup"]
-    exporters --> html["html.py\nself-contained preview"]
-    exporters --> cast["cast.py\nasciicast v2"]
-    exporters --> obs["obsidian.py\nvault-friendly export"]
-
-    repo --> ui["User interfaces"]
-    ui --> tui["tui/\nTextual dashboard"]
-    ui --> webui["web.py + web/\nlocal viewer + API"]
-    ui --> sharing["sharing.py\narchive + uploads"]
-
-    repo --> tests["tests/\npytest suite"]
-    tests --> cli_tests["CLI + hooks"]
-    tests --> web_tests["Web/TUI/export integration"]
-
-    repo --> docs["docs/\ncontext-engineering, docker, security"]
-    repo --> github[".github/\ncontributor instructions + skills"]
-```
-
 ### Repository Layout
 
 | Path | Purpose |
@@ -612,15 +314,11 @@ graph TD
 | `src/guild_scroll/` | Main package: CLI, session management, log schema, exporters, validation, replay, sharing, and web/TUI entrypoints |
 | `src/guild_scroll/exporters/` | Format-specific exporters for Markdown, HTML, asciicast, and Obsidian |
 | `src/guild_scroll/tui/` | Optional Textual dashboard components |
-| `src/guild_scroll/web.py` + `src/guild_scroll/web/` | Local preview server and related web helpers |
+| `src/guild_scroll/web/` | Local preview server package (`app.py`) and related web helpers |
 | `tests/` | Pytest suite covering CLI flows, schema compatibility, exporters, merge logic, hooks, and validation |
-| `docs/context-engineering/` | Project-specific design notes for tool/agent workflows; includes [process-diagrams.md](docs/context-engineering/process-diagrams.md) |
-| `docs/security/` | Security reviews (CVE research, Bandit findings) |
-| `docs/diagrams.md` | Full Mermaid diagram reference (architecture, data model, security, modules) |
+| `docs/context-engineering/` | Project-specific design notes for tool/agent workflows |
 | `.github/instructions/` | Shared contributor rules for Python, CLI implementation, and release prep |
 | `.github/skills/` | Reusable workflows such as `/issue` and `/release` |
-
-For a full directory tree, per-module descriptions, Mermaid component graphs, and notes to guide diagram and wireframe work, see [docs/context-engineering/project-structure.md](docs/context-engineering/project-structure.md).
 
 ### How the Python Package Is Organized
 
@@ -629,7 +327,7 @@ For a full directory tree, per-module descriptions, Mermaid component graphs, an
 - `log_schema.py` and `log_writer.py` define the JSONL event model used across recording, export, replay, and validation.
 - `asset_detector.py`, `tool_tagger.py`, `analysis.py`, and `search.py` enrich command history with security-specific metadata.
 - `exporters/` turns a loaded session into shareable outputs; `validator.py` and `merge.py` keep session data consistent across repairs and multi-terminal workflows.
-- `sharing.py`, `web.py`, `updater.py`, and `tui/` are feature layers built on top of the same loaded-session primitives.
+- `sharing.py`, `web/app.py`, `updater.py`, and `tui/` are feature layers built on top of the same loaded-session primitives.
 
 ### Data Model at a Glance
 
@@ -656,134 +354,32 @@ Sessions are stored under `./guild_scroll/sessions/<name>/` (CWD-local, like `.g
 
 Override the base path with `GUILD_SCROLL_DIR`.
 
+Set `GUILD_SCROLL_ALLOW_REMOTE=1` to allow the report server to bind to non-localhost addresses (required for Docker/container deployments that use `--host 0.0.0.0`). Localhost-only is the default.
+
+### Web API Endpoints
+
+`gscroll serve` exposes a JSON API under `/api/`. Key endpoints:
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/sessions` | List all sessions |
+| `GET` | `/api/session/{name}` | Fetch session detail (commands, notes, assets) |
+| `POST` | `/api/sessions` | Create a session scaffold (`{"name": "..."}`) → 201/409/422 |
+| `DELETE` | `/api/session/{name}` | Delete a session directory → 204/404/400 |
+| `POST` | `/api/session/{name}/continue` | Scaffold a new session part → `{"part": N}` |
+| `POST` | `/api/session/{name}/validate` | Validate (and optionally repair with `?repair=true`) → `{valid, errors, warnings, repaired}` |
+| `POST` | `/api/session/{name}/report` | Render a filtered export (body: `{"format": "md\|html", ...}`) |
+| `GET` | `/api/session/{name}/download` | Download session export (`?format=md\|html`) |
+| `GET` | `/api/session/{name}/discoveries` | Fetch recent notes/assets timeline |
+
 ### JSONL Event Types
 
 | Type | Key Fields |
 |---|---|
-| `session_meta` | `session_name`, `session_id`, `start_time`, `hostname`, `end_time`, `command_count`, `operator` (optional) |
+| `session_meta` | `session_name`, `session_id`, `start_time`, `hostname`, `end_time`, `command_count` |
 | `command` | `seq`, `command`, `timestamp_start`, `timestamp_end`, `exit_code`, `working_directory` |
 | `asset` | `seq`, `trigger_command`, `asset_type`, `captured_path`, `original_path`, `timestamp` |
 | `note` | `text`, `timestamp`, `tags` |
-
-> **Operator metadata:** The `operator` field in `session_meta` is auto-populated from the `USER`, `LOGNAME`, or `USERNAME` environment variable when a session starts. It is included in Markdown, HTML, and Obsidian exports and travels with the session archive.
-
----
-
-## Session Modes: CTF vs Assessment
-
-Guild Scroll supports two session security modes: **CTF** (default) and **Assessment**.
-
-### At-Rest Encryption
-
-Every session automatically generates a dedicated 256-bit AES encryption key (`session.enc_key`, permissions `0o600`). When a session is finalized, sensitive log files are encrypted with **AES-256-GCM**:
-
-| File | Encrypted |
-|------|-----------|
-| `logs/session.jsonl` | ✅ AES-256-GCM |
-| `logs/raw_io.log` | ✅ AES-256-GCM |
-| `logs/timing.log` | — (timing data only) |
-
-Encryption is **transparent** — all `gscroll` commands (export, search, validate, replay, TUI) decrypt on demand. Sessions created before v0.13.0 without an encryption key are read as-is.
-
-The key hierarchy per session:
-- **`session.key`** — 32-byte HMAC key for per-event integrity signatures
-- **`session.enc_key`** — 32-byte AES-256 key for at-rest encryption (new in v0.13.0)
-
-Both key files carry `0o600` permissions.
-
-### CTF Mode (default)
-
-Flexible security suitable for CTF competitions and practice:
-
-- HMAC integrity is generated for all events
-- Unsigned legacy events are accepted during validation
-- Standard file permissions
-- Session signing is optional
-- **At-rest encryption** for session data (v0.13.0+)
-
-```bash
-gscroll start htb-machine                # CTF mode (default)
-gscroll start htb-machine --mode ctf     # explicit
-```
-
-### Assessment Mode
-
-Strict security for professional penetration testing engagements:
-
-- **Mandatory HMAC** — every event must carry a valid HMAC signature; unsigned events are validation errors
-- **Strict permissions** — session directories are set to `0o700` (owner-only), key files to `0o600`
-- **Auto-signing** — session is automatically signed (`logs/session.sig`) when finalized
-- **Validation enforcement** — `gscroll validate` checks permissions, signing, and requires all events be HMAC-signed
-- **At-rest encryption** for session data (v0.13.0+)
-
-```bash
-gscroll start client-pentest --mode assessment
-```
-
-Set the default mode via environment variable:
-
-```bash
-export GUILD_SCROLL_MODE=assessment
-gscroll start client-pentest             # uses assessment mode
-```
-
-### TLS for Web Server
-
-Enable HTTPS for the report server with TLS 1.2+ using `--tls-cert` and `--tls-key`:
-
-```bash
-gscroll serve --tls-cert cert.pem --tls-key key.pem
-gscroll serve --host 0.0.0.0 --tls-cert cert.pem --tls-key key.pem
-```
-
-> See the [CTF vs Assessment mode decision tree](docs/context-engineering/process-diagrams.md#ctf-vs-assessment-mode-decision-tree) and [encryption lifecycle diagram](docs/context-engineering/process-diagrams.md#encryption-lifecycle) for a visual walk-through.
-
----
-
-## Session Integrity (HMAC-SHA256)
-
-<!-- visual: integrity-key-hierarchy | last-updated: v0.13.0 (2026-04) | update-when: key layout, signing, or encryption logic changes -->
-Guild Scroll provides cryptographic tamper-evidence for event logs using HMAC-SHA256 (stdlib only).
-
-The diagram below shows how the two per-session key files protect session data at the event level (HMAC) and at the storage level (AES-256-GCM):
-
-```mermaid
-flowchart LR
-    key["session.key\n32-byte HMAC key\n(0o600)"] -->|"signs each event"| event["CommandEvent\nNoteEvent\nAssetEvent\n→ event_hmac field"]
-    event --> jsonl[("session.jsonl")]
-    enckey["session.enc_key\n32-byte AES-256 key\n(0o600)"] -->|"encrypts on finalize"| jsonl
-    enckey -->|"encrypts on finalize"| raw[("raw_io.log")]
-    jsonl --> validate["gscroll validate\nHMAC recompute\n+ permission check"]
-    validate -->|"gscroll sign"| sig["session.sig\nchain-of-trust signature"]
-```
-
-### How it works
-
-When `gscroll start` creates a new session it generates a 32-byte random key stored at `{session_dir}/session.key` (permissions 0o600, readable only by the owning user). Every subsequent event written to the JSONL log — `command`, `note`, `asset`, `screenshot` — includes an `event_hmac` field: the HMAC-SHA256 hex digest of the event payload (all fields except `event_hmac` itself, serialised with sorted keys).
-
-```jsonl
-{"type": "command", "seq": 1, "command": "id", ..., "event_hmac": "3a7f..."}
-```
-
-`session_meta` records are excluded from HMAC signing because their fields (e.g. `command_count`, `end_time`) are updated in-place by `gscroll validate --repair`.
-
-### Verifying integrity
-
-```bash
-gscroll validate htb-machine
-```
-
-The validator loads `session.key`, recomputes the expected digest for every signed event, and reports any mismatch as an **error**:
-
-```
-- error: HMAC mismatch for command event (seq=3): record may have been tampered with
-```
-
-### Backward compatibility
-
-Sessions created before 0.7.0 do not have a `session.key` file and will validate cleanly — HMAC checks are skipped when the key file is absent. If events carry an `event_hmac` field but the key file is missing, the validator emits a **warning** rather than an error.
-
-> See the [session integrity chain diagram](docs/context-engineering/process-diagrams.md#session-integrity-chain) for a visual walk-through of the sign → validate → verify flow.
 
 ---
 
@@ -811,7 +407,7 @@ Sessions created before 0.7.0 do not have a `session.key` file and will validate
 - [x] Attack phase timeline (recon → exploit → post-exploit)
 - [x] MITRE ATT&CK mapping
 - [x] `gscroll tui` — Textual TUI dashboard
-- [x] `gscroll search` — filter by tool, phase, exit code, cwd, output-contains
+- [x] `gscroll search` — filter by tool, phase, exit code, cwd
 - [x] `[REC]` colored prompt indicator
 - [x] Auto-detect active session
 
@@ -858,11 +454,6 @@ Contributions, bug reports, and feature requests are welcome.
 4. Run the test suite: `PYTHONPATH=src python3 -m pytest tests/ -v`
 5. Open a pull request — PRs are reviewed before merging to `main`
 
-**Web UI tests (Playwright):**
-- `npm install && npx playwright install chromium`
-- `npm run test:e2e -- --project=chromium` (headless) or `npm run test:e2e:headed -- --project=chromium`
-- Coverage and live-session caveats: [docs/playwright.md](docs/playwright.md)
-
 **Guidelines:**
 - No external dependencies beyond `click` in core code
 - Follow the existing dataclass patterns (`to_dict()` / `from_dict()` with `type`-first serialization)
@@ -872,13 +463,11 @@ Contributions, bug reports, and feature requests are welcome.
 - Quick project overview: `CLAUDE.md`
 - Shared repository rules: `.github/copilot-instructions.md`
 - Auto-loaded implementation guidance: `.github/instructions/`
-- Project structure and component map: [docs/context-engineering/project-structure.md](docs/context-engineering/project-structure.md)
 - Design/context notes: `docs/context-engineering/`
 - Deployment mode docs: `docs/docker/` and `DOCKER.md`
-- Visual maintenance guide: `docs/visuals-maintenance.md`
 
 **High-value documentation issues:**
-- ~~Architecture deep-dive for the recording pipeline, JSONL schema, and multi-session merge flow~~ — see [docs/context-engineering/project-structure.md](docs/context-engineering/project-structure.md)
+- Architecture deep-dive for the recording pipeline, JSONL schema, and multi-session merge flow
 - Infrastructure/release guide covering version sync, changelog expectations, and contributor release workflow
 - Exporter extension guide for adding or maintaining output formats
 - Testing guide for fixtures, CLI coverage patterns, and integration-style session tests

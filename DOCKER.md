@@ -431,6 +431,7 @@ services:
   guild-scroll-app:
     environment:
       - GUILD_SCROLL_DIR=/custom/path
+         - GUILD_SCROLL_ALLOW_REMOTE=1
       - CUSTOM_VAR=value
 ```
 
@@ -440,7 +441,45 @@ Edit `k8s/configmap.yaml`:
 ```yaml
 data:
   GUILD_SCROLL_DIR: /work/guild_scroll
+   GUILD_SCROLL_ALLOW_REMOTE: "1"
   CUSTOM_VAR: value
+```
+
+### Remote Bind Guard for Containers (`GUILD_SCROLL_ALLOW_REMOTE`)
+
+#### Purpose
+
+`GUILD_SCROLL_ALLOW_REMOTE` controls whether `gscroll serve` may bind to non-localhost addresses.
+Container deployments use `0.0.0.0` so the app is reachable from Docker/Kubernetes networking, while local host runs remain localhost-only by default.
+
+#### Basic Workflow / Call Sequence
+
+1. Container entrypoint runs `gscroll serve --host 0.0.0.0 --port 8080`.
+2. `docker/entrypoint-app.sh` exports `GUILD_SCROLL_ALLOW_REMOTE=1` before launching the server.
+3. The web server host guard in `src/guild_scroll/web/app.py` accepts non-localhost bind only when this env var is enabled.
+
+#### Relationships
+
+- Called by: `docker/entrypoint-app.sh` (`serve` mode), Kubernetes app deployment env
+- Calls: `gscroll serve` -> `guild_scroll.web.app.create_server()`
+- Reads: `GUILD_SCROLL_ALLOW_REMOTE`
+- Writes: app listens on `0.0.0.0:8080` inside container runtime
+
+#### Example
+
+Docker Compose:
+```yaml
+services:
+   guild-scroll-app:
+      environment:
+         - GUILD_SCROLL_ALLOW_REMOTE=1
+```
+
+Kubernetes:
+```yaml
+env:
+   - name: GUILD_SCROLL_ALLOW_REMOTE
+      value: "1"
 ```
 
 ### Add Additional Tools to Kali

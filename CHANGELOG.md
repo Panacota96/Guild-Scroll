@@ -6,166 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
-## [0.13.0] — 2026-04-04
-
-### Security
-
-- **AES-256-GCM at-rest encryption for session data** — every session now generates a dedicated 256-bit encryption key (`session.enc_key`, mode `0o600`) at start time. When a session is finalized, `logs/session.jsonl` and `logs/raw_io.log` are encrypted in place using AES-256-GCM (authenticated encryption with a random 12-byte nonce per write).
-- **Transparent decryption** — all session readers (`gscroll list`, `gscroll export`, `gscroll search`, `gscroll validate`, `gscroll replay`, `gscroll tui`) decrypt transparently; no user action required.
-- **Post-finalization note support** — `gscroll note` performs a decrypt-append-re-encrypt cycle when adding notes to an already-finalized (encrypted) session.
-- **`gscroll finalize` encryption-aware rewrite** — the finalize command preserves the encryption envelope when updating session metadata.
-- **Backward compatibility** — sessions created before v0.13.0 (without `session.enc_key`) are still loaded and displayed without modification.
+## [0.5.0] — 2026-04-06
 
 ### Added
 
-- New `src/guild_scroll/crypto.py` module with AES-256-GCM helpers: `generate_encryption_key`, `load_encryption_key`, `encrypt_data`, `decrypt_data`, `encrypt_file`, `decrypt_file_bytes`, `is_encrypted`, `find_session_root_from_log`, `read_plaintext`.
-- `ENC_KEY_NAME = "session.enc_key"` constant in `config.py`.
-- 33 new tests in `tests/test_crypto.py` covering key management, encrypt/decrypt round-trips, file-level helpers, path utilities, and finalize/load/list integration.
-
-### Changed
-
-- `pyproject.toml` — added `cryptography>=46.0.5` as a core dependency (required for AES-256-GCM; no pure-stdlib alternative exists).
-
----
-
-## [0.12.1] — 2026-04-04
-
-### Security
-
-- **TLS cipher suite hardening for `gscroll serve`** — the TLS context now restricts TLS 1.2 cipher suites to forward-secret suites (`ECDHE+AESGCM`, `ECDHE+CHACHA20`, `DHE+AESGCM`, `DHE+CHACHA20`) and explicitly excludes weak/null ciphers (`!aNULL`, `!eNULL`, `!EXPORT`, `!DES`, `!RC4`, `!MD5`, `!PSK`, `!SRP`). TLS 1.3 suite selection is handled securely by the stdlib ssl module.
-- **TLS configuration tests** — added six focused tests in `TestCreateServer` to verify: minimum protocol version (TLS 1.2), correct protocol constant (`PROTOCOL_TLS_SERVER`), cert-chain loading, cipher suite enforcement, TLS confirmation message for non-loopback binds, and that no SSL context is created for plain HTTP servers.
-
----
-
-## [0.12.0] — 2026-04-03
-
-### Added
-
-- **Session modes: CTF vs Assessment** — `gscroll start --mode ctf|assessment` selects the security posture for a session. Default mode is configurable via the `GUILD_SCROLL_MODE` environment variable (fallback: `ctf`).
-- **Assessment mode security enforcements** — sessions started in `assessment` mode automatically:
-  - Set strict directory permissions (`0o700`) and file permissions (`0o600`) on the session tree and key file.
-  - Require HMAC signatures on all events (unsigned events are validation errors).
-  - Auto-sign the session (`logs/session.sig`) on finalize.
-- **Validator assessment checks** — `gscroll validate` now reports assessment-specific errors: unsigned events, missing `session.key`, loose file permissions, and missing signatures.
-- **Mode column in `gscroll list`** — session listings now include a `MODE` column showing `ctf` or `assessment`.
-- **Mode indicator in `gscroll status`** — active session status shows the session mode.
-- **TLS support for `gscroll serve`** — new `--tls-cert` and `--tls-key` options enable HTTPS with TLS 1.2+ minimum version for the web report server.
-- **`mode` field in `SessionMeta`** — stored in JSONL logs for audit trail; backward-compatible with legacy sessions (defaults to `None`).
-
-### Changed
-
-- `gscroll start` now accepts `--mode ctf|assessment` (default: `ctf`). Assessment mode displays `[ASSESSMENT]` in the start banner.
-- `gscroll serve` warning for non-loopback bind now suggests `--tls-cert`/`--tls-key`.
-
----
-
-## [0.11.1] — 2026-04-03
-
-### Added
-
-- **Integration tests for `GET /api/sessions`** — new `TestSessionsApi` class validates empty-list response, session enumeration, JSON schema, security headers, and meta field presence.
-- **Integration tests for `GET /api/session/{name}`** — new `TestSessionApi` class validates 200 with full session payload (commands, notes, assets), 404 for missing sessions, 400 for traversal attempts, search/filter query parameters, and security headers.
-- **Integration tests for `GET /api/session/{name}/download`** — new `TestDownload` class validates `Content-Disposition` and content-type for `md` and `html` formats, 400 on missing or invalid format, 404 for missing sessions, traversal rejection, and that exported content includes session name and recorded commands.
+- **POST /api/sessions** — Create a new session directory scaffold via the web API (returns 201 on success, 409 on name conflict, 422 on invalid/unsafe name).
+- **DELETE /api/session/{name}** — Delete a session directory via the web API (returns 204 on success, 404 if not found, 400 on path traversal).
+- **POST /api/session/{name}/continue** — Scaffold a new numbered part for an existing session via the web API (returns 200 with part number, 404 if session not found).
+- **POST /api/session/{name}/validate** — Run session integrity validation via the web API, optionally repairing with `?repair=true` (returns `{valid, errors, warnings, repaired}`).
+- **`GUILD_SCROLL_ALLOW_REMOTE=1` env var** — Allows binding the report server to non-localhost addresses (e.g. `0.0.0.0` inside Docker). Localhost-only restriction remains the default.
 
 ### Fixed
 
-- All HTTP handlers already covered `FileNotFoundError`, `ValueError`, and `OSError` — confirmed by the new test suite; no silent connection drops remain.
-
----
-
-## [0.11.0] — 2026-04-03
-
-### Added
-
-- **Drag & Drop asset upload** — session detail pages now feature a drag-and-drop upload zone (in the sidebar). Users can drop PNG, JPEG, GIF, WEBP, SVG, or PDF files (up to 10 MB) and see inline previews immediately after upload.
-- **`POST /api/session/{name}/upload`** — new HTTP endpoint that accepts `multipart/form-data` uploads, validates file type by both extension and magic bytes, and stores files in `{session}/assets/uploads/`.
-- **`GET /api/session/{name}/asset/{filename}`** — new endpoint to serve previously uploaded asset files directly from the browser.
-- **Session heartbeat** — the session detail page now auto-pings the server every 30 seconds; a live/expired badge reflects liveness. Heartbeats expire after 90 s of silence.
-- **`POST /api/session/{name}/heartbeat`** — record a heartbeat for a session.
-- **`GET /api/session/{name}/heartbeat`** — query `live`, `expired`, or `unknown` status for a session.
-- **Session creation from web view** — the dashboard toolbar now includes a "+ New Session" button that prompts for a name, calls `POST /api/sessions`, and redirects to the new session page.
-- **`POST /api/sessions`** — creates a lightweight session (directory + `session.jsonl` meta record) without requiring a live terminal; name is sanitised server-side.
-- **Integrated zsh terminal launcher** — the session detail page contains a "Open Terminal" button that spawns a PTY-backed `zsh` process tied to the session. All output is recorded to `terminal.log` inside the session directory. The embedded text-area interface supports typing and sending commands, with 500 ms output polling.
-- **`POST /api/session/{name}/terminal/start`** — spawn a `zsh` PTY for a session.
-- **`POST /api/session/{name}/terminal/write`** — send input bytes to the running terminal.
-- **`GET /api/session/{name}/terminal/read`** — poll buffered output and liveness.
-- **`POST /api/session/{name}/terminal/stop`** — terminate the terminal and flush the log.
-
-### Changed
-
-- Session detail page header now shows a coloured heartbeat status badge (⚡ LIVE / ✖ EXPIRED / ● UNKNOWN).
-- Index page toolbar has a "+ New Session" button alongside search/sort controls.
-
----
-
-## [0.10.0] — 2026-04-03
-
-### Added
-
-- **Dashboard search bar** — the index page now includes a search input that instantly filters session cards by name or hostname as you type, with a `🔍` icon and accessible `aria-label`.
-- **Dashboard sort controls** — a dropdown lets users sort sessions by date (newest/oldest first), name (A–Z / Z–A), or command count (most commands first). Default remains newest-first.
-- **Session count indicator** — displays the total number of sessions (e.g. "5 sessions") and updates to show filtered counts (e.g. "2 of 5 sessions") when searching.
-- **Keyboard shortcut `/`** — pressing `/` anywhere on the index page focuses the search bar, matching the convention used by GitHub and other developer tools.
-- **No-match message** — when a search query produces zero results, a "No sessions match your search" message is shown instead of a blank grid.
-- **Data attributes on session cards** — each card carries `data-name`, `data-start`, `data-host`, and `data-commands` attributes enabling client-side filtering and sorting without server round-trips.
-
----
-
-## [0.9.1] — 2026-04-03
-
-### Fixed
-
-- **Command output no longer shows "No output captured" for users with modern shell prompts** — `extract_command_outputs` in `output_extractor.py` previously only recognised `%`, `$`, and `#` as prompt terminators, so sessions recorded under Oh My Zsh, Powerlevel10k, Fish, or any theme that uses `❯`, `➜`, `>`, `→`, or `λ` returned an empty output list, causing every command to display "No output captured" in HTML/Markdown exports and the web UI.  The fix extends the recognised terminator set to include those modern characters and adds a content-based fallback for any other unknown prompt format.
-
----
-
-## [0.8.0] — 2026-04-03
-
-### Added
-
-- **`[REC]` indicator in `gscroll start` output** — the start command now prefixes its status messages with `[REC]` (e.g. `[REC] Starting session 'foo' — type 'exit' or Ctrl-D to stop.`) instead of `[gscroll]`, giving a consistent active-recording signal across the CLI and shell prompt.
-- **`hooks.py` — persistent shell hook module** — new `src/guild_scroll/hooks.py` generates self-contained zsh (`ZDOTDIR`) and bash (`BASH_ENV`) hook scripts that inject `preexec`/`precmd` (zsh) and `PROMPT_COMMAND`/`trap DEBUG` (bash) recording hooks without modifying the user's dotfiles.
-- **Configurable recording marker (`GUILD_SCROLL_REC_MARKER`)** — both the zsh and bash hook templates read `$GUILD_SCROLL_REC_MARKER` at runtime, defaulting to `[REC]`, so operators can customise the prompt prefix to any string.
-
----
-
-## [0.7.1] — 2026-04-03
-
-### Fixed
-
-- **`gscroll serve --host 0.0.0.0` now works** — removed the hard-coded `127.0.0.1`-only guard in `web/app.py` and `server.py` that caused `Error: gscroll serve only supports 127.0.0.1 for safety.` in containerised environments (Exegol, Kali Docker).  A warning is printed instead when the server is bound to a non-loopback address, so users are informed of the exposure without being blocked.
-- **CLI help updated** — `--host` option now documents `0.0.0.0` as a valid value; epilog examples include `gscroll serve --host 0.0.0.0`.
-
----
-
-## [0.7.0] — 2026-04-02
-
-### Added
-
-- **Operator metadata in SessionMeta** — `SessionMeta` now includes an `operator: Optional[str]` field auto-populated from the `USER`, `LOGNAME`, or `USERNAME` environment variable at session start (`log_schema.py`, `session.py`).
-- **Operator propagated to exports** — Markdown, HTML, and Obsidian exporters render the operator identity when present; the field also travels with session archives (`exporters/markdown.py`, `exporters/html.py`, `exporters/obsidian.py`).
-- **Operator tests** — tests cover metadata roundtrip, detection priority, and rendering in all three export formats (`tests/test_log_schema.py`, `tests/test_session.py`, `tests/test_export_markdown.py`, `tests/test_export_html.py`, `tests/test_export_obsidian.py`).
-- **README operator metadata note** — JSONL event table and a callout block document the operator field and its auto-detection source.
-
----
-
-## [0.6.0] — 2026-04-02
-
-### Added
-
-- **CPTS-style HTML writeup mode** — `gscroll export --format html --writeup` now renders a full structured pentest report with sections: Executive Summary, Scope, Walkthrough, Reproducibility Steps, Rabbit Holes / Dead Ends, Findings, Remediation, and Appendix (`exporters/html.py`).
-- **Responsive HTML writeup layout** — writeup reports use a professional print-friendly stylesheet with responsive media queries for desktop and mobile (`_WRITEUP_CSS` in `exporters/html.py`).
-- **Summary tables in HTML writeup** — Assessment Summary section includes a commands-count table and a tools-used breakdown by phase tag.
-- **Writeup workflow documentation** — README includes a new *Writeup Workflow* section with usage examples and a section reference table.
-- **8 new tests** for HTML writeup mode — section presence, rabbit holes, reproducibility, summary tables, responsive layout, session data rendering, CLI `--writeup` flag for HTML format, and empty-session safety (`tests/test_export_html.py`, `tests/test_cli.py`).
-
----
-
-## [0.5.0] — 2026-04-02
-
-### Added
-
-- **Output-content search filter** — `gscroll search --output-contains TEXT` filters commands by a case-insensitive substring match against captured terminal output; combines with all existing filters in AND logic (`search.py`, `cli.py`).
+- **Duplicate `serve()` command removed** — deleted the second duplicate `serve` handler in `cli.py` so only one canonical implementation remains.
+- **Server tests now target active implementation** — `tests/test_server.py` imports `create_server` from `guild_scroll.web.app` and uses the current signature.
+- **Legacy dead modules removed** — deleted superseded `src/guild_scroll/server.py` and `src/guild_scroll/web.py` to avoid conflicting APIs.
+- **Docs aligned with package layout** — README now references `src/guild_scroll/web/` and `web/app.py` instead of removed `web.py`.
 
 ---
 

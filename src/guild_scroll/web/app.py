@@ -2,202 +2,38 @@ from __future__ import annotations
 
 import html
 import json
-import os
 import re
-import select
-import signal
-import socket
-import subprocess
 import shutil
+import socket
 import tempfile
-import threading
-import time
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
-from guild_scroll.config import SESSION_LOG_NAME, get_sessions_dir
+from guild_scroll.config import (
+    get_sessions_dir,
+    SESSION_LOG_NAME,
+    HOOK_EVENTS_NAME,
+    PARTS_DIR_NAME,
+)
 from guild_scroll.exporters.html import export_html
 from guild_scroll.exporters.markdown import export_markdown
 from guild_scroll.exporters.output_extractor import build_command_output_map
-from guild_scroll.log_schema import SessionMeta
+from guild_scroll.log_schema import NoteEvent, SessionMeta
 from guild_scroll.search import SearchFilter, search_commands
-from guild_scroll.session import close_session, delete_session, list_sessions
+from guild_scroll.session import list_sessions
 from guild_scroll.session_loader import LoadedSession, load_session
 from guild_scroll.utils import generate_session_id, iso_timestamp, sanitize_session_name
+from guild_scroll.validator import repair_session, validate_session
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
-# ── Upload constants ───────────────────────────────────────────────────────────
-_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
-_ALLOWED_UPLOAD_EXTENSIONS: dict[str, str] = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".svg": "image/svg+xml",
-    ".pdf": "application/pdf",
-}
-_UPLOAD_MAGIC: dict[str, bytes] = {
-    ".png": b"\x89PNG",
-    ".jpg": b"\xff\xd8\xff",
-    ".jpeg": b"\xff\xd8\xff",
-    ".gif": b"GIF",
-    ".webp": b"RIFF",
-    ".pdf": b"%PDF",
-}
 
-# ── Heartbeat constants ────────────────────────────────────────────────────────
-_HEARTBEAT_EXPIRY_SECS = 90.0
-
-# ── Terminal constants ─────────────────────────────────────────────────────────
-_TERMINAL_MAX_INPUT_BYTES = 4096
-
-
-class _TerminalInfo:
-    """State for a live PTY terminal attached to a recording session."""
-
-    __slots__ = ("pid", "master_fd", "log_path", "_buf", "_buf_lock")
-
-    def __init__(self, pid: int, master_fd: int, log_path: Path) -> None:
-        self.pid = pid
-        self.master_fd = master_fd
-        self.log_path = log_path
-        self._buf: list[bytes] = []
-        self._buf_lock = threading.Lock()
-
-    def append_output(self, data: bytes) -> None:
-        with self._buf_lock:
-            self._buf.append(data)
-
-    def pop_output(self) -> bytes:
-        with self._buf_lock:
-            result = b"".join(self._buf)
-            self._buf.clear()
-        return result
-
-    def is_alive(self) -> bool:
-        try:
-            pid, _ = os.waitpid(self.pid, os.WNOHANG)
-            return pid == 0
-        except OSError:
-            return False
-
-
-# ── Module-level state (declared after _TerminalInfo) ─────────────────────────
-_session_heartbeats: dict[str, float] = {}
-_heartbeats_lock = threading.Lock()
-_active_terminals: dict[str, _TerminalInfo] = {}
-_terminals_lock = threading.Lock()
-
-
-# ── Heartbeat helpers ──────────────────────────────────────────────────────────
-
-def _record_heartbeat(session_name: str) -> None:
-    with _heartbeats_lock:
-        _session_heartbeats[session_name] = time.monotonic()
-
-
-def _heartbeat_status(session_name: str) -> str:
-    """Return 'live', 'expired', or 'unknown'."""
-    with _heartbeats_lock:
-        ts = _session_heartbeats.get(session_name)
-    if ts is None:
-        return "unknown"
-    if time.monotonic() - ts > _HEARTBEAT_EXPIRY_SECS:
-        return "expired"
-    return "live"
-
-
-def _clear_heartbeat(session_name: str) -> None:
-    with _heartbeats_lock:
-        _session_heartbeats.pop(session_name, None)
-
-
-# ── Upload helpers ─────────────────────────────────────────────────────────────
-
-def _parse_multipart_upload(content_type: str, body: bytes) -> tuple[str, bytes] | None:
-    """Extract (original_filename, raw_data) from a multipart/form-data body."""
-    boundary = None
-    for segment in content_type.split(";"):
-        segment = segment.strip()
-        if segment.lower().startswith("boundary="):
-            boundary = segment[len("boundary="):].strip().strip("\"'")
-            break
-    if not boundary:
-        return None
-    sep = ("--" + boundary).encode()
-    parts = body.split(sep)
-    for raw in parts[1:]:
-        if raw.startswith(b"--"):
-            continue
-        raw = raw.lstrip(b"\r\n")
-        if b"\r\n\r\n" not in raw:
-            continue
-        headers_raw, _, payload = raw.partition(b"\r\n\r\n")
-        payload = payload.rstrip(b"\r\n")
-        filename = None
-        for line in headers_raw.split(b"\r\n"):
-            decoded = line.decode("utf-8", errors="replace")
-            if "content-disposition" in decoded.lower() and "filename=" in decoded.lower():
-                for token in decoded.split(";"):
-                    token = token.strip()
-                    if token.lower().startswith("filename="):
-                        filename = token[len("filename="):].strip().strip("\"'")
-                        break
-        if filename:
-            return filename, payload
-    return None
-
-
-def _validate_upload_file(filename: str, data: bytes) -> tuple[bool, str]:
-    """Return (is_valid, content_type_or_error_message)."""
-    suffix = Path(filename).suffix.lower()
-    if suffix not in _ALLOWED_UPLOAD_EXTENSIONS:
-        allowed = ", ".join(sorted(_ALLOWED_UPLOAD_EXTENSIONS))
-        return False, f"Unsupported file type '{suffix or '(none)'}'. Allowed: {allowed}"
-    content_type = _ALLOWED_UPLOAD_EXTENSIONS[suffix]
-    if suffix == ".svg":
-        if b"<svg" not in data[:1024].lower():
-            return False, "File does not appear to be valid SVG"
-        return True, content_type
-    magic = _UPLOAD_MAGIC.get(suffix)
-    if magic and not data.startswith(magic):
-        if suffix == ".webp":
-            if len(data) < 12 or data[8:12] != b"WEBP":
-                return False, "File content does not match .webp extension"
-        else:
-            return False, f"File content does not match {suffix} extension"
-    return True, content_type
-
-
-# ── Terminal helpers ───────────────────────────────────────────────────────────
-
-def _terminal_reader_thread(info: _TerminalInfo) -> None:
-    """Background daemon thread: drain PTY master fd into info's buffer."""
-    while True:
-        try:
-            ready, _, _ = select.select([info.master_fd], [], [], 0.2)
-        except (OSError, ValueError):
-            break
-        if not ready:
-            continue
-        try:
-            data = os.read(info.master_fd, 4096)
-        except OSError:
-            break
-        if not data:
-            break
-        info.append_output(data)
-        try:
-            with open(info.log_path, "ab") as fh:
-                fh.write(data)
-        except OSError:
-            pass
+def _write_jsonl_record(log_path: Path, record: dict[str, object]) -> None:
+    serialized = json.dumps(record, ensure_ascii=False)
+    log_path.write_text(serialized + "\n", encoding="utf-8")
 
 
 def _is_safe_session_name(name: str) -> bool:
@@ -402,12 +238,11 @@ def _format_command_count(value: object) -> int:  # noqa: ANN001
 
 
 def _render_index_page(sessions: list[dict]) -> str:
-    total_count = len(sessions)
     if not sessions:
         cards = (
             '<article class="session-card empty-state">'
             '<h2>No sessions found</h2>'
-            '<p>Start a run with <code>gscroll start</code> to forge your first chronicle.</p>'
+            '<p>Start a run with gscroll start to forge your first chronicle.</p>'
             '</article>'
         )
     else:
@@ -415,20 +250,13 @@ def _render_index_page(sessions: list[dict]) -> str:
         for session in sessions:
             name = str(session.get("session_name") or "unknown")
             start_time = _format_start_time(session.get("start_time"))
-            raw_start = str(session.get("start_time") or "")
-            raw_host = str(session.get("hostname") or "").lower()
             hostname = _format_hostname(session.get("hostname"))
             command_count = _format_command_count(session.get("command_count"))
             quoted_name = quote(name, safe="")
             escaped_name = html.escape(name)
-            js_session_path = json.dumps(quoted_name)
-            js_display_name = json.dumps(name)
-            html_js_session_path = html.escape(js_session_path)
-            html_js_display_name = html.escape(js_display_name)
             card_items.append(
                 """
-<article class="session-card" data-name="{data_name}" data-start="{data_start}"
-  data-host="{data_host}" data-commands="{command_count}">
+<article class="session-card">
   <header class="session-head">
     <h2>{session_name}</h2>
     <span class="glyph">SIGIL</span>
@@ -442,10 +270,6 @@ def _render_index_page(sessions: list[dict]) -> str:
     <a class="rune-link" href="/session/{session_path}">Open Session</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
     <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
-    <button class="rune-link danger-link" type="button"
-      onclick="gsCloseSession({html_js_session_path}, {html_js_display_name}, this)">Close</button>
-    <button class="rune-link danger-link" type="button"
-      onclick="gsDeleteSession({html_js_session_path}, {html_js_display_name}, this)">Delete</button>
   </nav>
 </article>
 """.format(
@@ -454,11 +278,6 @@ def _render_index_page(sessions: list[dict]) -> str:
                     hostname=html.escape(hostname),
                     command_count=command_count,
                     session_path=quoted_name,
-                    html_js_session_path=html_js_session_path,
-                    html_js_display_name=html_js_display_name,
-                    data_name=html.escape(name.lower()),
-                    data_start=html.escape(raw_start),
-                    data_host=html.escape(raw_host),
                 )
             )
         cards = "\n".join(card_items)
@@ -468,7 +287,7 @@ def _render_index_page(sessions: list[dict]) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guild Scroll Session Codex</title>
+<title>Guild Scroll Sessions</title>
 <style>
 :root {
   --bg-void: #060b14;
@@ -516,82 +335,6 @@ body {
   color: var(--text-muted);
   font-family: "Consolas", "Lucida Console", monospace;
 }
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 1rem;
-  animation: rise 390ms ease-out;
-}
-.search-box {
-  flex: 1 1 220px;
-  position: relative;
-}
-.search-box input {
-  width: 100%;
-  padding: 0.55rem 0.8rem 0.55rem 2.2rem;
-  border: 1px solid rgba(63, 199, 255, 0.42);
-  border-radius: 999px;
-  background: rgba(16, 33, 52, 0.88);
-  color: var(--text-main);
-  font-size: 0.92rem;
-  font-family: "Consolas", "Lucida Console", monospace;
-  outline: none;
-  transition: border-color 160ms ease, box-shadow 160ms ease;
-}
-.search-box input:focus {
-  border-color: var(--hover-core);
-  box-shadow: 0 0 12px rgba(42, 208, 255, 0.22);
-}
-.search-box input::placeholder { color: var(--text-muted); }
-.search-icon {
-  position: absolute;
-  left: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-muted);
-  font-size: 0.88rem;
-  pointer-events: none;
-}
-.sort-select {
-  padding: 0.5rem 0.7rem;
-  border: 1px solid rgba(63, 199, 255, 0.42);
-  border-radius: 999px;
-  background: rgba(16, 33, 52, 0.88);
-  color: var(--text-main);
-  font-size: 0.82rem;
-  font-family: "Consolas", "Lucida Console", monospace;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 160ms ease;
-}
-.sort-select:focus { border-color: var(--hover-core); }
-.session-count {
-  color: var(--text-muted);
-  font-family: "Consolas", monospace;
-  font-size: 0.82rem;
-  white-space: nowrap;
-}
-.kbd-hint {
-  color: var(--text-muted);
-  font-family: "Consolas", monospace;
-  font-size: 0.72rem;
-  border: 1px solid rgba(158, 178, 199, 0.3);
-  border-radius: 4px;
-  padding: 0.12rem 0.38rem;
-  margin-left: 0.3rem;
-}
-.no-match {
-  text-align: center;
-  grid-column: 1 / -1;
-  padding: 2rem 0;
-  display: none;
-}
-.no-match p {
-  color: var(--text-muted);
-  margin: 0;
-}
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -611,7 +354,6 @@ body {
   border-color: var(--hover-core);
   box-shadow: inset 0 0 0 1px rgba(224, 171, 84, 0.26), 0 0 24px rgba(42, 208, 255, 0.18);
 }
-.session-card.gs-hidden { display: none; }
 .session-head {
   display: flex;
   align-items: baseline;
@@ -674,18 +416,6 @@ body {
   color: #ffffff;
   background: rgba(42, 208, 255, 0.15);
 }
-.danger-link {
-  border-color: rgba(220, 60, 60, 0.55);
-  color: #ffb3b3;
-  background: none;
-  cursor: pointer;
-  font-family: "Consolas", monospace;
-}
-.danger-link:hover {
-  border-color: #ff4444;
-  color: #ffffff;
-  background: rgba(220, 50, 50, 0.22);
-}
 .empty-state {
   text-align: center;
 }
@@ -697,21 +427,10 @@ body {
   color: var(--text-muted);
   margin-bottom: 0;
 }
-.new-session-btn {
-  background: rgba(42, 208, 255, 0.1);
-  border-color: rgba(63, 199, 255, 0.6);
-  cursor: pointer;
-}
-.new-session-btn:hover {
-  background: rgba(42, 208, 255, 0.22);
-  border-color: var(--hover-core);
-}
 @media (max-width: 700px) {
   .shell { padding: 1.3rem 0.78rem 1.6rem; }
   .hero h1 { font-size: 1.72rem; }
   .session-meta div { grid-template-columns: 68px 1fr; }
-  .toolbar { gap: 0.4rem; }
-  .kbd-hint { display: none; }
 }
 @keyframes rise {
   from { opacity: 0; transform: translateY(8px); }
@@ -725,148 +444,14 @@ body {
     <h1>Guild Scroll Session Codex</h1>
     <p>Neon runes mark each expedition. Select a chronicle to inspect reports or extract artifacts.</p>
   </section>
-  __TOOLBAR__
-  <section class="grid" id="session-grid">
+  <section class="grid">
     __CARDS__
-    <div class="no-match" id="no-match-msg"><p>No sessions match your search.</p></div>
   </section>
 </main>
-<script>
-function gsDeleteSession(sessionPath, displayName, btn) {
-  if (!confirm('Delete session "' + displayName + '"?\\nThis action cannot be undone and will remove all logs and data.')) return;
-  fetch('/api/session/' + sessionPath, {method: 'DELETE'})
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.deleted !== undefined) {
-        var card = btn.closest('article');
-        if (card) { card.remove(); gsUpdateCount(); }
-      } else {
-        alert('Delete failed: ' + (d.error || 'Unknown error'));
-      }
-    })
-    .catch(function() { alert('Delete failed: network error'); });
-}
-function gsCloseSession(sessionPath, displayName, btn) {
-  if (!confirm('Close session "' + displayName + '"?\\nThis stops any live terminal and removes the session data.')) return;
-  fetch('/api/session/' + sessionPath + '/close', {method: 'POST'})
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.closed !== undefined) {
-        var card = btn.closest('article');
-        if (card) { card.remove(); gsUpdateCount(); }
-      } else {
-        alert('Close failed: ' + (d.error || 'Unknown error'));
-      }
-    })
-    .catch(function() { alert('Close failed: network error'); });
-}
-var searchInput = document.getElementById('gs-search');
-var sortSelect = document.getElementById('gs-sort');
-var countEl = document.getElementById('gs-count');
-var grid = document.getElementById('session-grid');
-var noMatch = document.getElementById('no-match-msg');
-
-function gsUpdateCount() {
-  if (!countEl) return;
-  var cards = grid.querySelectorAll('.session-card:not(.empty-state)');
-  var visible = 0;
-  cards.forEach(function(c) { if (!c.classList.contains('gs-hidden')) visible++; });
-  var total = cards.length;
-  countEl.textContent = visible === total ? total + ' session' + (total !== 1 ? 's' : '')
-    : visible + ' of ' + total + ' session' + (total !== 1 ? 's' : '');
-  if (noMatch) noMatch.style.display = (visible === 0 && total > 0) ? 'block' : 'none';
-}
-
-function gsFilter() {
-  if (!searchInput) return;
-  var query = searchInput.value.toLowerCase().trim();
-  var cards = grid.querySelectorAll('.session-card:not(.empty-state)');
-  cards.forEach(function(card) {
-    var name = card.getAttribute('data-name') || '';
-    var host = card.getAttribute('data-host') || '';
-    var match = !query || name.indexOf(query) !== -1 || host.indexOf(query) !== -1;
-    card.classList.toggle('gs-hidden', !match);
-  });
-  gsUpdateCount();
-}
-
-function gsSort() {
-  if (!sortSelect || !grid) return;
-  var cards = Array.prototype.slice.call(grid.querySelectorAll('.session-card:not(.empty-state)'));
-  var mode = sortSelect.value;
-  cards.sort(function(a, b) {
-    switch(mode) {
-      case 'date-desc':
-        return (b.getAttribute('data-start') || '').localeCompare(a.getAttribute('data-start') || '');
-      case 'date-asc':
-        return (a.getAttribute('data-start') || '').localeCompare(b.getAttribute('data-start') || '');
-      case 'name-asc':
-        return (a.getAttribute('data-name') || '').localeCompare(b.getAttribute('data-name') || '');
-      case 'name-desc':
-        return (b.getAttribute('data-name') || '').localeCompare(a.getAttribute('data-name') || '');
-      case 'commands-desc':
-        return (parseInt(b.getAttribute('data-commands'),10)||0) - (parseInt(a.getAttribute('data-commands'),10)||0);
-      default:
-        return 0;
-    }
-  });
-  cards.forEach(function(card) { grid.appendChild(card); });
-}
-
-if (searchInput) searchInput.addEventListener('input', gsFilter);
-if (sortSelect) sortSelect.addEventListener('change', gsSort);
-document.addEventListener('keydown', function(e) {
-  if (e.key === '/' && document.activeElement !== searchInput
-      && document.activeElement.tagName !== 'INPUT'
-      && document.activeElement.tagName !== 'TEXTAREA'
-      && document.activeElement.tagName !== 'SELECT') {
-    e.preventDefault();
-    if (searchInput) searchInput.focus();
-  }
-});
-function gsNewSession() {
-  var name = prompt('Session name:');
-  if (!name || !name.trim()) return;
-  fetch('/api/sessions', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({name: name.trim()})
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(d) {
-    if (d.url) { window.location.href = d.url; }
-    else { alert('Failed: ' + (d.error || 'Unknown error')); }
-  })
-  .catch(function() { alert('Failed to create session: network error'); });
-}
-gsUpdateCount();
-</script>
 </body>
 </html>
 """
-    toolbar = ""
-    if total_count > 0:
-        toolbar = (
-            '<div class="toolbar">'
-            '<div class="search-box">'
-            '<span class="search-icon" aria-hidden="true">&#x1F50D;</span>'
-            '<input type="search" id="gs-search" placeholder="Search sessions by name or host…"'
-            ' aria-label="Search sessions">'
-            '</div>'
-            '<select id="gs-sort" class="sort-select" aria-label="Sort sessions">'
-            '<option value="date-desc">Newest first</option>'
-            '<option value="date-asc">Oldest first</option>'
-            '<option value="name-asc">Name A–Z</option>'
-            '<option value="name-desc">Name Z–A</option>'
-            '<option value="commands-desc">Most commands</option>'
-            '</select>'
-            '<span class="session-count" id="gs-count"></span>'
-            '<span class="kbd-hint" title="Press / to search">/</span>'
-            '<button class="rune-link new-session-btn" type="button"'
-            ' onclick="gsNewSession()">+ New Session</button>'
-            '</div>'
-        )
-    return template.replace("__TOOLBAR__", toolbar, 1).replace("__CARDS__", cards, 1)
+    return template.replace("__CARDS__", cards, 1)
 
 
 def _render_session_page(
@@ -926,13 +511,6 @@ def _render_session_page(
 
         discovery_query = urlencode({**filter_params, **discovery_params})
         session_name = quote(session.meta.session_name)
-        js_session_name = json.dumps(session_name)
-        js_display_name = json.dumps(session.meta.session_name)
-        onclick_session_name = html.escape(js_session_name, quote=True)
-        onclick_display_name = html.escape(js_display_name, quote=True)
-        is_finalized = bool(session.meta.finalized)
-        status_class = "heartbeat-badge status-closed" if is_finalized else "heartbeat-badge status-unknown"
-        status_label = "■ CLOSED" if is_finalized else "● UNKNOWN"
         preview_count = len(discoveries["timeline"])
         total_discoveries = len(discoveries["notes"]) + len(discoveries["assets"])
 
@@ -963,10 +541,8 @@ a {{ color: #8cc8ff; }}
 .meta-line {{ color: #adc0da; margin-top: 0.6rem; }}
 .layout {{ display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 1rem; align-items: start; }}
 .actions {{ display: flex; gap: 0.6rem; flex-wrap: wrap; margin: 0.9rem 0 1rem; }}
-.action-pill {{ border: 1px solid #36567f; border-radius: 999px; padding: 0.3rem 0.75rem; text-decoration: none; color: #8cc8ff; }}
+.action-pill {{ border: 1px solid #36567f; border-radius: 999px; padding: 0.3rem 0.75rem; text-decoration: none; }}
 .action-pill:hover {{ border-color: #52d0ff; background: #1a2a42; }}
-.action-pill.danger-pill {{ border-color: rgba(220, 60, 60, 0.55); color: #ffb3b3; background: none; cursor: pointer; font-family: "Consolas", "Lucida Console", monospace; font-size: inherit; }}
-.action-pill.danger-pill:hover {{ border-color: #ff4444; color: #ffffff; background: rgba(220, 50, 50, 0.22); }}
 .report-frame {{ width: 100%; height: 760px; border: 1px solid #334b70; background: #fff; border-radius: 8px; }}
 .report-preview {{ background: #0b1020; border: 1px solid #334b70; border-radius: 8px; padding: 1rem; overflow: auto; min-height: 760px; }}
 .discoveries-panel {{ position: sticky; top: 1rem; border: 1px solid #3d608d; border-radius: 12px; background: linear-gradient(160deg, #13243b, #0f1d31); padding: 0.9rem; box-shadow: inset 0 0 0 1px rgba(96, 142, 193, 0.16); }}
@@ -986,26 +562,6 @@ a {{ color: #8cc8ff; }}
 .discovery-summary {{ margin-top: 0.35rem; color: #edf4ff; word-break: break-word; }}
 .discovery-tags {{ margin-top: 0.25rem; color: #9eb8da; font-size: 0.78rem; word-break: break-word; }}
 .discovery-empty {{ margin: 0.8rem 0 0; color: #9eb8da; }}
-.heartbeat-badge {{ display: inline-block; padding: 0.18rem 0.55rem; border-radius: 999px; font-size: 0.74rem; font-family: "Consolas", monospace; margin-left: 0.75rem; vertical-align: middle; }}
-.status-live {{ background: #1a472a; color: #6ee89e; border: 1px solid #2ea863; }}
-.status-expired {{ background: #4a1a1a; color: #ff9090; border: 1px solid #c03030; }}
-.status-unknown {{ background: #252525; color: #aaaaaa; border: 1px solid #555; }}
-.status-closed {{ background: #1f2430; color: #d0d7e2; border: 1px solid #5a6b85; }}
-.upload-zone {{ margin-top: 0.9rem; border: 2px dashed #3d608d; border-radius: 8px; padding: 0.8rem 0.6rem; text-align: center; cursor: pointer; transition: border-color 160ms, background 160ms; color: #9eb8da; font-size: 0.83rem; }}
-.upload-zone:hover, .upload-zone.drag-active {{ border-color: #52d0ff; background: rgba(42,208,255,0.07); color: #d1f0ff; }}
-.upload-previews {{ margin-top: 0.55rem; display: grid; gap: 0.45rem; }}
-.upload-preview {{ background: #0f1c2e; border: 1px solid #304a6d; border-radius: 6px; padding: 0.45rem; font-size: 0.79rem; color: #9eb8da; }}
-.preview-img {{ max-width: 100%; max-height: 120px; border-radius: 4px; display: block; margin-bottom: 0.3rem; }}
-.upload-error {{ background: #2a1010; border: 1px solid #7a2020; border-radius: 6px; padding: 0.45rem; font-size: 0.79rem; color: #ffaaaa; }}
-.terminal-section {{ margin-top: 1rem; border: 1px solid #3d608d; border-radius: 12px; background: #060e1a; overflow: hidden; }}
-.terminal-header {{ display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.85rem; background: #0c1828; border-bottom: 1px solid #284060; }}
-.terminal-header h3 {{ margin: 0; font-size: 0.93rem; color: #c8e8ff; }}
-.terminal-output {{ font-family: "Consolas", "Courier New", monospace; font-size: 0.81rem; background: #030a10; color: #b0dfb8; padding: 0.65rem; min-height: 180px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; display: none; }}
-.terminal-input-row {{ display: flex; gap: 0.45rem; padding: 0.45rem 0.65rem; background: #080f1a; border-top: 1px solid #284060; display: none; }}
-.terminal-input-row input {{ flex: 1; background: #050c16; border: 1px solid #3d608d; color: #e9efff; padding: 0.32rem 0.55rem; border-radius: 4px; font-family: "Consolas", monospace; font-size: 0.81rem; outline: none; }}
-.terminal-input-row input:focus {{ border-color: #52d0ff; }}
-.terminal-input-row button {{ border: 1px solid #3d608d; background: #0e1a2c; color: #8cc8ff; padding: 0.32rem 0.75rem; border-radius: 4px; cursor: pointer; font-family: "Consolas", monospace; font-size: 0.79rem; }}
-.terminal-input-row button:hover {{ border-color: #52d0ff; background: #1a2a42; }}
 @media (max-width: 980px) {{
     .layout {{ grid-template-columns: 1fr; }}
     .discoveries-panel {{ position: static; }}
@@ -1015,20 +571,13 @@ a {{ color: #8cc8ff; }}
 <body>
 <main class="page-shell">
     <section class="header-card">
-        <h1>Session: {html.escape(session.meta.session_name)}
-            <span id="gs-session-status" class="{status_class}">{status_label}</span>
-        </h1>
+        <h1>Session: {html.escape(session.meta.session_name)}</h1>
         <p class="meta-line">Commands in report: {len(session.commands)} | Preview format: {html.escape(preview_format)}</p>
         <div class="actions">
-            <a class="action-pill back-pill" href="/">&#8592; Back to sessions</a>
             <a class="action-pill" href="/session/{session_name}?{html_query}">HTML preview</a>
             <a class="action-pill" href="/session/{session_name}?{md_query}">Markdown preview</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
-            <button class="action-pill danger-pill" type="button"
-              onclick="gsCloseSession({onclick_session_name}, {onclick_display_name})">Close Session</button>
-            <button class="action-pill danger-pill" type="button"
-              onclick="gsDeleteSession({onclick_session_name}, {onclick_display_name})">Delete Session</button>
         </div>
     </section>
 
@@ -1053,229 +602,9 @@ a {{ color: #8cc8ff; }}
                 <a href="/api/session/{session_name}/discoveries?{discovery_query}">API view</a>
             </div>
             {timeline_markup}
-            <div class="upload-zone" id="gs-upload-zone" role="button" tabindex="0"
-                 aria-label="Drop assets here or click to upload">
-                <input type="file" id="gs-file-input"
-                       accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.pdf"
-                       style="display:none" multiple>
-                &#128204; Drop images/assets here or <u>click to upload</u><br>
-                <small style="color:#6a8aaa">PNG JPEG GIF WEBP SVG PDF &mdash; max 10&thinsp;MB</small>
-            </div>
-            <div id="gs-upload-previews" class="upload-previews"></div>
         </aside>
     </section>
-
-    <section class="terminal-section">
-        <div class="terminal-header">
-            <h3>&#x1F4BB; Integrated Terminal</h3>
-            <button class="action-pill" id="gs-terminal-btn" type="button"
-                    onclick="gsTerminalToggle()">Open Terminal</button>
-        </div>
-        <div id="gs-terminal-output" class="terminal-output"></div>
-        <div class="terminal-input-row" id="gs-terminal-input-row">
-            <input type="text" id="gs-terminal-input"
-                   placeholder="Type command and press Enter…" autocomplete="off">
-            <button type="button" onclick="gsTerminalSend()">Send</button>
-        </div>
-    </section>
 </main>
-<script>
-let gsIsFinalized = {json.dumps(is_finalized)};
-function gsDeleteSession(sessionPath, displayName) {{
-  if (!confirm('Delete session "' + displayName + '"?\\nThis action cannot be undone and will remove all logs and data.')) return;
-  fetch('/api/session/' + sessionPath, {{method: 'DELETE'}})
-    .then(function(r) {{ return r.json(); }})
-    .then(function(d) {{
-      if (d.deleted !== undefined) {{
-        window.location.href = '/';
-      }} else {{
-        alert('Delete failed: ' + (d.error || 'Unknown error'));
-      }}
-    }})
-    .catch(function() {{ alert('Delete failed: network error'); }});
-}}
-function gsCloseSession(sessionPath, displayName) {{
-  if (!confirm('Close session "' + displayName + '"?\\nThis marks the session as ended and stops live heartbeats.')) return;
-  fetch('/api/session/' + sessionPath + '/close', {{method: 'POST'}})
-    .then(function(r) {{ return r.json().then(function(d) {{ return {{status: r.status, body: d}}; }}); }})
-    .then(function(result) {{
-      var d = result.body || {{}};
-      if (result.status < 400 && (d.closed || d.finalized)) {{
-        gsIsFinalized = true;
-        var badge = document.getElementById('gs-session-status');
-        if (badge) {{ badge.textContent = '■ CLOSED'; badge.className = 'heartbeat-badge status-closed'; }}
-        if (window.gsHeartbeatTimer) {{ clearInterval(window.gsHeartbeatTimer); }}
-        alert('Session closed.');
-      }} else {{
-        alert('Close failed: ' + (d.error || 'Unknown error'));
-      }}
-    }})
-    .catch(function() {{ alert('Close failed: network error'); }});
-}}
-
-// ── Heartbeat ──────────────────────────────────────────────────
-function gsHeartbeat() {{
-  fetch('/api/session/' + {js_session_name} + '/heartbeat', {{method: 'POST'}})
-    .then(function(r) {{ return r.json().then(function(d) {{ return {{ok: r.ok, body: d}}; }}); }})
-    .then(function(result) {{
-      var el = document.getElementById('gs-session-status');
-      if (!el) return;
-      if (!result.ok) {{
-        el.textContent = '✖ EXPIRED';
-        el.className = 'heartbeat-badge status-expired';
-        if (window.gsHeartbeatTimer) {{ clearInterval(window.gsHeartbeatTimer); }}
-        return;
-      }}
-      var status = (result.body && result.body.status) || 'unknown';
-      if (status === 'live' || status === 'ok') {{
-        el.textContent = '⚡ LIVE';
-        el.className = 'heartbeat-badge status-live';
-      }} else if (status === 'unknown') {{
-        el.textContent = '● UNKNOWN';
-        el.className = 'heartbeat-badge status-unknown';
-      }} else {{
-        el.textContent = '✖ EXPIRED';
-        el.className = 'heartbeat-badge status-expired';
-      }}
-    }})
-    .catch(function() {{
-      var el = document.getElementById('gs-session-status');
-      if (el) {{ el.textContent = '✖ EXPIRED'; el.className = 'heartbeat-badge status-expired'; }}
-    }});
-}}
-if (!gsIsFinalized) {{
-  window.gsHeartbeatTimer = setInterval(gsHeartbeat, 30000);
-  gsHeartbeat();
-}}
-
-// ── Asset upload ───────────────────────────────────────────────
-var _uploadZone = document.getElementById('gs-upload-zone');
-var _fileInput = document.getElementById('gs-file-input');
-var _uploadPreviews = document.getElementById('gs-upload-previews');
-
-function gsHandleFiles(files) {{
-  Array.prototype.slice.call(files).forEach(function(file) {{
-    var fd = new FormData();
-    fd.append('file', file, file.name);
-    fetch('/api/session/' + {js_session_name} + '/upload', {{method: 'POST', body: fd}})
-      .then(function(r) {{ return r.json(); }})
-      .then(function(d) {{
-        var el = document.createElement('div');
-        if (d.filename) {{
-          el.className = 'upload-preview';
-          if (d.content_type && d.content_type.indexOf('image/') === 0) {{
-            var img = document.createElement('img');
-            img.src = d.url; img.className = 'preview-img'; img.alt = d.filename;
-            el.appendChild(img);
-          }}
-          var span = document.createElement('span');
-          span.textContent = d.filename + ' (' + Math.round(d.size / 1024) + '\u202fKB)';
-          el.appendChild(span);
-        }} else {{
-          el.className = 'upload-error';
-          el.textContent = 'Upload failed: ' + (d.error || 'Unknown error');
-        }}
-        if (_uploadPreviews) _uploadPreviews.prepend(el);
-      }})
-      .catch(function() {{
-        var err = document.createElement('div');
-        err.className = 'upload-error';
-        err.textContent = 'Upload failed: network error';
-        if (_uploadPreviews) _uploadPreviews.prepend(err);
-      }});
-  }});
-}}
-
-if (_uploadZone) {{
-  _uploadZone.addEventListener('dragover', function(e) {{
-    e.preventDefault(); _uploadZone.classList.add('drag-active');
-  }});
-  _uploadZone.addEventListener('dragleave', function() {{
-    _uploadZone.classList.remove('drag-active');
-  }});
-  _uploadZone.addEventListener('drop', function(e) {{
-    e.preventDefault(); _uploadZone.classList.remove('drag-active');
-    gsHandleFiles(e.dataTransfer.files);
-  }});
-  _uploadZone.addEventListener('click', function(e) {{
-    if (e.target !== _fileInput && _fileInput) _fileInput.click();
-  }});
-  _uploadZone.addEventListener('keydown', function(e) {{
-    if (e.key === 'Enter' || e.key === ' ') {{ e.preventDefault(); if (_fileInput) _fileInput.click(); }}
-  }});
-}}
-if (_fileInput) {{
-  _fileInput.addEventListener('change', function() {{
-    gsHandleFiles(_fileInput.files); _fileInput.value = '';
-  }});
-}}
-
-// ── Terminal ───────────────────────────────────────────────────
-var _termOpen = false;
-var _termPollTimer = null;
-
-function gsTerminalToggle() {{
-  if (_termOpen) {{ gsTerminalStop(); }} else {{ gsTerminalStart(); }}
-}}
-function gsTerminalStart() {{
-  fetch('/api/session/' + {js_session_name} + '/terminal/start', {{method: 'POST'}})
-    .then(function(r) {{ return r.json(); }})
-    .then(function(d) {{
-      if (d.started || d.error === 'Terminal already running') {{
-        document.getElementById('gs-terminal-output').style.display = 'block';
-        document.getElementById('gs-terminal-input-row').style.display = 'flex';
-        document.getElementById('gs-terminal-btn').textContent = 'Stop Terminal';
-        _termOpen = true;
-        _termPollTimer = setInterval(gsTerminalRead, 500);
-      }} else {{
-        alert('Terminal: ' + (d.error || 'Could not start terminal'));
-      }}
-    }})
-    .catch(function() {{ alert('Failed to start terminal'); }});
-}}
-function gsTerminalStop() {{
-  if (_termPollTimer) {{ clearInterval(_termPollTimer); _termPollTimer = null; }}
-  fetch('/api/session/' + {js_session_name} + '/terminal/stop', {{method: 'POST'}});
-  document.getElementById('gs-terminal-output').style.display = 'none';
-  document.getElementById('gs-terminal-input-row').style.display = 'none';
-  document.getElementById('gs-terminal-btn').textContent = 'Open Terminal';
-  _termOpen = false;
-}}
-function gsTerminalRead() {{
-  fetch('/api/session/' + {js_session_name} + '/terminal/read')
-    .then(function(r) {{ return r.json(); }})
-    .then(function(d) {{
-      if (d.output) {{
-        var out = document.getElementById('gs-terminal-output');
-        if (out) {{ out.textContent += d.output; out.scrollTop = out.scrollHeight; }}
-      }}
-      if (!d.alive) {{
-        if (_termPollTimer) {{ clearInterval(_termPollTimer); _termPollTimer = null; }}
-        _termOpen = false;
-        document.getElementById('gs-terminal-btn').textContent = 'Open Terminal';
-        var out2 = document.getElementById('gs-terminal-output');
-        if (out2) out2.textContent += '\\n[Terminal closed]\\n';
-      }}
-    }});
-}}
-function gsTerminalSend() {{
-  var inp = document.getElementById('gs-terminal-input');
-  if (!inp || !inp.value.trim()) return;
-  var cmd = inp.value + '\\n';
-  inp.value = '';
-  fetch('/api/session/' + {js_session_name} + '/terminal/write', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{input: cmd}})
-  }});
-}}
-var _termInput = document.getElementById('gs-terminal-input');
-if (_termInput) {{
-  _termInput.addEventListener('keydown', function(e) {{
-    if (e.key === 'Enter') {{ gsTerminalSend(); }}
-  }});
-}}
-</script>
 </body>
 </html>
 """
@@ -1305,20 +634,6 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             session_name = parsed.path[len("/api/session/"):-len("/discoveries")].strip("/")
             self._handle_discoveries_api(session_name, params)
             return
-        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/heartbeat"):
-            session_name = parsed.path[len("/api/session/"):-len("/heartbeat")].strip("/")
-            self._handle_heartbeat_get(session_name)
-            return
-        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/terminal/read"):
-            session_name = parsed.path[len("/api/session/"):-len("/terminal/read")].strip("/")
-            self._handle_terminal_read(session_name)
-            return
-        if parsed.path.startswith("/api/session/") and "/asset/" in parsed.path:
-            rest = parsed.path[len("/api/session/"):]
-            name_part, _, file_part = rest.partition("/asset/")
-            if file_part:
-                self._handle_asset(name_part, file_part)
-                return
         if parsed.path.startswith("/api/session/"):
             session_name = parsed.path[len("/api/session/"):].strip("/")
             self._handle_session_api(session_name, params)
@@ -1326,42 +641,38 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
 
         self._send_text("Not found", status=404)
 
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/session/"):
+            session_name = parsed.path[len("/api/session/"):].strip("/")
+            self._handle_delete_session(session_name)
+            return
+        self._send_text("Not found", status=404)
+
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
 
         if parsed.path == "/api/sessions":
             self._handle_create_session()
             return
-        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/close"):
-            session_name = parsed.path[len("/api/session/"):-len("/close")].strip("/")
-            self._handle_close_session(session_name)
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/continue"):
+            session_name = parsed.path[len("/api/session/"):-len("/continue")].strip("/")
+            self._handle_continue_session(session_name)
             return
-        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/upload"):
-            session_name = parsed.path[len("/api/session/"):-len("/upload")].strip("/")
-            self._handle_upload(session_name)
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/validate"):
+            session_name = parsed.path[len("/api/session/"):-len("/validate")].strip("/")
+            self._handle_validate_session(session_name, params)
             return
-        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/heartbeat"):
-            session_name = parsed.path[len("/api/session/"):-len("/heartbeat")].strip("/")
-            self._handle_heartbeat_post(session_name)
-            return
-        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/terminal/start"):
-            session_name = parsed.path[len("/api/session/"):-len("/terminal/start")].strip("/")
-            self._handle_terminal_start(session_name)
-            return
-        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/terminal/write"):
-            session_name = parsed.path[len("/api/session/"):-len("/terminal/write")].strip("/")
-            self._handle_terminal_write(session_name)
-            return
-        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/terminal/stop"):
-            session_name = parsed.path[len("/api/session/"):-len("/terminal/stop")].strip("/")
-            self._handle_terminal_stop(session_name)
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/notes"):
+            session_name = parsed.path[len("/api/session/"):-len("/notes")].strip("/")
+            self._handle_add_note(session_name)
             return
         if not (parsed.path.startswith("/api/session/") and parsed.path.endswith("/report")):
             self._send_text("Not found", status=404)
             return
 
         session_name = parsed.path[len("/api/session/"):-len("/report")].strip("/")
-        params = parse_qs(parsed.query)
         body = self._read_json_body()
         if isinstance(body, dict):
             for key in ("format", "tool", "phase", "exit_code", "cwd", "part"):
@@ -1369,14 +680,6 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 if value not in (None, ""):
                     params[key] = [str(value)]
         self._handle_report(session_name, params)
-
-    def do_DELETE(self) -> None:
-        parsed = urlparse(self.path)
-        if parsed.path.startswith("/api/session/"):
-            session_name_raw = parsed.path[len("/api/session/"):].strip("/")
-            self._handle_delete_session(session_name_raw)
-            return
-        self._send_json({"error": "Not found"}, status=404)
 
     def log_message(self, format: str, *args) -> None:
         return
@@ -1426,6 +729,152 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 "content": content,
             }
         )
+
+    def _handle_create_session(self) -> None:
+        body = self._read_json_body()
+        raw_name = (body or {}).get("name", "") if isinstance(body, dict) else ""
+        if not raw_name or not isinstance(raw_name, str):
+            self._send_json({"error": "Invalid session name: 'name' is required"}, status=422)
+            return
+
+        raw_name = raw_name.strip()
+        if not _is_safe_session_name(raw_name) and (
+            "/" in raw_name or "\\" in raw_name or ".." in raw_name
+        ):
+            self._send_json({"error": "Invalid session name: path traversal not allowed"}, status=422)
+            return
+
+        session_name = sanitize_session_name(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=422)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if sess_dir.exists():
+            self._send_json({"error": f"Session already exists: {session_name!r}"}, status=409)
+            return
+
+        logs_dir = sess_dir / "logs"
+        assets_dir = sess_dir / "assets"
+        screenshots_dir = sess_dir / "screenshots"
+        for directory in (logs_dir, assets_dir, screenshots_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+
+        meta = SessionMeta(
+            session_name=session_name,
+            session_id=generate_session_id(),
+            start_time=iso_timestamp(),
+            hostname=socket.gethostname(),
+        )
+        _write_jsonl_record(logs_dir / SESSION_LOG_NAME, meta.to_dict())
+
+        self._send_json({"session_name": session_name, "created": True}, status=201)
+
+    def _handle_delete_session(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        shutil.rmtree(str(sess_dir))
+        self.send_response(204)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.end_headers()
+
+    def _handle_continue_session(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        parts_dir = sess_dir / PARTS_DIR_NAME
+        parts_dir.mkdir(exist_ok=True)
+        existing = [p for p in parts_dir.iterdir() if p.is_dir() and p.name.isdigit()]
+        next_part = max((int(p.name) for p in existing), default=1) + 1  # part 1 is logs/, so next is 2+
+
+        part_logs_dir = parts_dir / str(next_part) / "logs"
+        part_assets_dir = parts_dir / str(next_part) / "assets"
+        for directory in (part_logs_dir, part_assets_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+
+        part_meta = SessionMeta(
+            session_name=session_name,
+            session_id=generate_session_id(),
+            start_time=iso_timestamp(),
+            hostname=socket.gethostname(),
+        )
+        _write_jsonl_record(part_logs_dir / SESSION_LOG_NAME, part_meta.to_dict())
+
+        self._send_json({"session_name": session_name, "part": next_part}, status=200)
+
+    def _handle_validate_session(self, raw_name: str, params: dict[str, list[str]]) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        do_repair = _query_value(params, "repair") in {"true", "1", "yes"}
+        report = validate_session(sess_dir)
+        repaired: list[str] = []
+        if do_repair:
+            repair_report = repair_session(sess_dir)
+            repaired = list(repair_report.repaired)
+
+        self._send_json({
+            "valid": report.is_valid,
+            "errors": list(report.errors),
+            "warnings": list(report.warnings),
+            "repaired": repaired,
+        })
+
+    def _handle_add_note(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        body = self._read_json_body()
+        if not isinstance(body, dict):
+            self._send_json({"error": "Invalid request body"}, status=400)
+            return
+
+        text = str(body.get("text", "")).strip()
+        if not text:
+            self._send_json({"error": "Note text is required"}, status=400)
+            return
+
+        raw_tags = body.get("tags", [])
+        tags: list[str] = []
+        if isinstance(raw_tags, list):
+            tags = [str(tag).strip() for tag in raw_tags if str(tag).strip()]
+
+        event = NoteEvent(text=text, timestamp=iso_timestamp(), tags=tags)
+        log_path = sess_dir / "logs" / SESSION_LOG_NAME
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
+
+        self._send_json({"ok": True}, status=201)
 
     def _handle_discoveries_api(self, raw_name: str, params: dict[str, list[str]]) -> None:
         try:
@@ -1496,399 +945,6 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             )
         )
 
-    def _handle_delete_session(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        try:
-            delete_session(session_name)
-        except FileNotFoundError:
-            self._send_json({"error": "Session not found"}, status=404)
-            return
-        except ValueError:
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        except OSError as exc:
-            self._send_json({"error": f"Could not delete session: {exc}"}, status=500)
-            return
-        _clear_heartbeat(session_name)
-        self._send_json({"deleted": session_name})
-
-    def _handle_close_session(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        sessions_dir = get_sessions_dir()
-        try:
-            session_dir = (sessions_dir / session_name).resolve(strict=False)
-            session_dir.relative_to(sessions_dir.resolve())
-        except (OSError, ValueError):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        if not session_dir.exists():
-            self._send_json({"error": "Session not found"}, status=404)
-            return
-
-        try:
-            delete_session(session_name)
-        except FileNotFoundError:
-            self._send_json({"error": "Session not found"}, status=404)
-            return
-        except ValueError:
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        except OSError as exc:
-            self._send_json({"error": f"Could not close session: {exc}"}, status=500)
-            return
-        terminal_stopped = self._stop_active_terminal(session_name)
-        with _heartbeats_lock:
-            heartbeat_cleared = _session_heartbeats.pop(session_name, None) is not None
-        self._send_json(
-            {
-                "closed": session_name,
-                "terminal_stopped": terminal_stopped,
-                "heartbeat_cleared": heartbeat_cleared,
-            }
-        )
-
-    # ── Session creation ───────────────────────────────────────────────────────
-
-    def _handle_create_session(self) -> None:
-        body = self._read_json_body()
-        name_raw = str(body.get("name", "")).strip() if isinstance(body, dict) else ""
-        if not name_raw:
-            self._send_json({"error": "Session name required"}, status=400)
-            return
-        name = sanitize_session_name(name_raw)
-        if not name or not _is_safe_session_name(name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        sessions_dir = get_sessions_dir()
-        # Resolve and re-validate to surface the path clearly before any file I/O
-        try:
-            session_dir = (sessions_dir / name).resolve(strict=False)
-            session_dir.relative_to(sessions_dir.resolve())
-        except ValueError:
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        if session_dir.exists():
-            self._send_json({"error": f"Session already exists: {name}"}, status=409)
-            return
-        logs_dir = session_dir / "logs"
-        logs_dir.mkdir(parents=True)
-        (session_dir / "assets").mkdir()
-        meta = SessionMeta(
-            session_name=name,
-            session_id=generate_session_id(),
-            start_time=iso_timestamp(),
-            hostname=socket.gethostname(),
-        )
-        (logs_dir / SESSION_LOG_NAME).write_text(
-            json.dumps(meta.to_dict(), ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        self._send_json({"session": name, "url": f"/session/{quote(name)}"}, status=201)
-
-    # ── Asset upload ───────────────────────────────────────────────────────────
-
-    def _handle_upload(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        sessions_dir = get_sessions_dir()
-        try:
-            session_dir = (sessions_dir / session_name).resolve(strict=False)
-            session_dir.relative_to(sessions_dir.resolve())
-        except ValueError:
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        if not session_dir.exists():
-            self._send_json({"error": "Session not found"}, status=404)
-            return
-        content_type_hdr = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type_hdr:
-            self._send_json({"error": "Expected multipart/form-data"}, status=400)
-            return
-        try:
-            raw_len = int(self.headers.get("Content-Length", "0"))
-        except (TypeError, ValueError):
-            raw_len = 0
-        if raw_len <= 0:
-            self._send_json({"error": "Empty body"}, status=400)
-            return
-        if raw_len > _UPLOAD_MAX_BYTES:
-            self._send_json(
-                {"error": f"Upload exceeds {_UPLOAD_MAX_BYTES // 1024 // 1024} MB limit"},
-                status=413,
-            )
-            return
-        body = self.rfile.read(raw_len)
-        result = _parse_multipart_upload(content_type_hdr, body)
-        if result is None:
-            self._send_json({"error": "Failed to parse multipart upload"}, status=400)
-            return
-        filename, data = result
-        if len(data) > _UPLOAD_MAX_BYTES:
-            self._send_json({"error": "File data exceeds size limit"}, status=413)
-            return
-        ok, content_type_or_err = _validate_upload_file(filename, data)
-        if not ok:
-            self._send_json({"error": content_type_or_err}, status=415)
-            return
-        uploads_dir = session_dir / "assets" / "uploads"
-        uploads_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = _SAFE_FILENAME_RE.sub("_", Path(filename).name)
-        safe_name = safe_name.strip("._") or "upload"
-        dest = uploads_dir / safe_name
-        if dest.exists():
-            stem, suffix = dest.stem, dest.suffix
-            counter = 1
-            while dest.exists():
-                dest = uploads_dir / f"{stem}_{counter}{suffix}"
-                counter += 1
-        # Resolve and validate before writing to rule out any path traversal in filename
-        try:
-            resolved_dest = dest.resolve(strict=False)
-            resolved_dest.relative_to(uploads_dir.resolve())
-        except ValueError:
-            self._send_json({"error": "Invalid upload filename."}, status=400)
-            return
-        resolved_dest.write_bytes(data)
-        asset_url = f"/api/session/{quote(session_name)}/asset/{quote(resolved_dest.name, safe='')}"
-        self._send_json({
-            "filename": resolved_dest.name,
-            "size": len(data),
-            "content_type": content_type_or_err,
-            "url": asset_url,
-        })
-
-    def _handle_asset(self, raw_name: str, raw_filename: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        safe_fn = _SAFE_FILENAME_RE.sub("_", Path(unquote(raw_filename)).name)
-        sessions_dir = get_sessions_dir()
-        asset_path = sessions_dir / session_name / "assets" / "uploads" / safe_fn
-        try:
-            resolved_asset = asset_path.resolve()
-            resolved_asset.relative_to(
-                (sessions_dir / session_name / "assets").resolve()
-            )
-        except (ValueError, OSError):
-            self._send_json({"error": "Invalid asset path."}, status=400)
-            return
-        if not resolved_asset.is_file():
-            self._send_json({"error": "Asset not found"}, status=404)
-            return
-        suffix = resolved_asset.suffix.lower()
-        content_type = _ALLOWED_UPLOAD_EXTENSIONS.get(suffix, "application/octet-stream")
-        self._send_bytes(resolved_asset.read_bytes(), content_type=content_type)
-
-    # ── Heartbeat ──────────────────────────────────────────────────────────────
-
-    def _handle_heartbeat_get(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        if not (get_sessions_dir() / session_name).exists():
-            self._send_json({"error": "Session not found"}, status=404)
-            return
-        status = _heartbeat_status(session_name)
-        with _heartbeats_lock:
-            ts = _session_heartbeats.get(session_name)
-        last_beat = None
-        if ts is not None:
-            delta = time.monotonic() - ts
-            last_beat = (datetime.now(timezone.utc) - timedelta(seconds=delta)).isoformat()
-        self._send_json({
-            "session": session_name,
-            "status": status,
-            "last_beat": last_beat,
-            "expiry_secs": int(_HEARTBEAT_EXPIRY_SECS),
-        })
-
-    def _handle_heartbeat_post(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        if not (get_sessions_dir() / session_name).exists():
-            self._send_json({"error": "Session not found"}, status=404)
-            return
-        _record_heartbeat(session_name)
-        self._send_json({
-            "status": "ok",
-            "session": session_name,
-            "expires_in": int(_HEARTBEAT_EXPIRY_SECS),
-        })
-
-    # ── Terminal ───────────────────────────────────────────────────────────────
-
-    def _handle_terminal_start(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        try:
-            import pty as _pty
-        except ImportError:
-            self._send_json({"error": "Terminal not supported on this platform"}, status=501)
-            return
-        sessions_dir = get_sessions_dir()
-        try:
-            session_dir = (sessions_dir / session_name).resolve(strict=False)
-            session_dir.relative_to(sessions_dir.resolve())
-        except ValueError:
-            self._send_json({"error": "Session not found"}, status=404)
-            return
-        if not session_dir.exists():
-            self._send_json({"error": "Session not found"}, status=404)
-            return
-        with _terminals_lock:
-            if session_name in _active_terminals:
-                info = _active_terminals[session_name]
-                if info.is_alive():
-                    self._send_json({"error": "Terminal already running"}, status=409)
-                    return
-                try:
-                    os.close(info.master_fd)
-                except OSError:
-                    pass
-                del _active_terminals[session_name]
-        log_path = session_dir / "terminal.log"
-        master_fd, slave_fd = _pty.openpty()
-        zsh_path = shutil.which("zsh")
-        if not zsh_path:
-            os.close(master_fd)
-            os.close(slave_fd)
-            self._send_json({"error": "zsh not found on this system"}, status=500)
-            return
-        # Spawn zsh with a minimal, controlled environment to avoid env-variable attacks
-        home_dir = os.environ.get("HOME") or tempfile.gettempdir()
-        minimal_env = {
-            "TERM": "xterm-256color",
-            "HOME": home_dir,
-            "USER": os.environ.get("USER", ""),
-            "LOGNAME": os.environ.get("LOGNAME", ""),
-            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-            "SHELL": zsh_path,
-        }
-        try:
-            proc = subprocess.Popen(
-                [zsh_path],
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                start_new_session=True,
-                close_fds=True,
-                env=minimal_env,
-            )
-        except FileNotFoundError:
-            os.close(master_fd)
-            os.close(slave_fd)
-            self._send_json({"error": "zsh not found on this system"}, status=500)
-            return
-        os.close(slave_fd)  # parent doesn't need the slave end
-        info = _TerminalInfo(pid=proc.pid, master_fd=master_fd, log_path=log_path)
-        with _terminals_lock:
-            _active_terminals[session_name] = info
-        t = threading.Thread(target=_terminal_reader_thread, args=(info,), daemon=True)
-        t.start()
-        self._send_json({"started": True, "session": session_name, "pid": proc.pid})
-
-    def _handle_terminal_write(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        body = self._read_json_body()
-        input_text = str(body.get("input", "")) if isinstance(body, dict) else ""
-        if not input_text:
-            self._send_json({"error": "No input provided"}, status=400)
-            return
-        with _terminals_lock:
-            info = _active_terminals.get(session_name)
-        if info is None:
-            self._send_json({"error": "No active terminal for this session"}, status=404)
-            return
-        # Truncate at character level first so multi-byte sequences are never split
-        if len(input_text) * 4 > _TERMINAL_MAX_INPUT_BYTES:
-            input_text = input_text[: _TERMINAL_MAX_INPUT_BYTES // 4]
-        raw_bytes = input_text.encode("utf-8", errors="replace")
-        try:
-            os.write(info.master_fd, raw_bytes)
-        except OSError as exc:
-            self._send_json({"error": f"Write failed: {exc}"}, status=500)
-            return
-        self._send_json({"ok": True})
-
-    def _handle_terminal_read(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        with _terminals_lock:
-            info = _active_terminals.get(session_name)
-        if info is None:
-            self._send_json({"session": session_name, "output": "", "alive": False})
-            return
-        output = info.pop_output()
-        alive = info.is_alive()
-        self._send_json({
-            "session": session_name,
-            "output": output.decode("utf-8", errors="replace"),
-            "alive": alive,
-        })
-
-    def _stop_active_terminal(self, session_name: str) -> bool:
-        with _terminals_lock:
-            info = _active_terminals.pop(session_name, None)
-        if info is None:
-            return False
-        # Close master fd first so the reader thread unblocks and exits
-        try:
-            os.close(info.master_fd)
-        except OSError:
-            pass
-        # Graceful SIGTERM, then SIGKILL fallback to avoid zombie processes
-        try:
-            os.kill(info.pid, signal.SIGTERM)
-        except OSError:
-            pass
-        for _ in range(10):
-            try:
-                if os.waitpid(info.pid, os.WNOHANG)[0] != 0:
-                    break
-            except OSError:
-                break
-            time.sleep(0.05)
-        else:
-            try:
-                os.kill(info.pid, signal.SIGKILL)
-            except OSError:
-                pass
-            try:
-                os.waitpid(info.pid, 0)
-            except OSError:
-                pass
-        return True
-
-    def _handle_terminal_stop(self, raw_name: str) -> None:
-        session_name = unquote(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name."}, status=400)
-            return
-        stopped = self._stop_active_terminal(session_name)
-        if not stopped:
-            self._send_json({"error": "No active terminal"}, status=404)
-            return
-        self._send_json({"stopped": True, "session": session_name})
-
     def _load_filtered_session(self, raw_name: str, params: dict[str, list[str]]) -> LoadedSession:
         session_name = unquote(raw_name)
         if not _is_safe_session_name(session_name):
@@ -1947,55 +1003,27 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
 
-def create_server(
-    host: str = "127.0.0.1",
-    port: int = 1551,
-    tls_certfile: str | None = None,
-    tls_keyfile: str | None = None,
-) -> ThreadingHTTPServer:
-    """Create the report server, binding to *host*:*port*.
+def create_server(host: str = "127.0.0.1", port: int = 1551) -> ThreadingHTTPServer:
+    """Create a report server.
 
-    When *tls_certfile* and *tls_keyfile* are provided, the server socket is
-    wrapped with TLS (minimum TLS 1.2) for encrypted communication.
+    Binds to ``host``.  For safety, non-localhost hosts are rejected unless the
+    ``GUILD_SCROLL_ALLOW_REMOTE=1`` environment variable is set (intended for
+    Docker/container deployments where network isolation is provided externally).
     """
-    if host not in ("127.0.0.1", "::1", "localhost"):
-        if tls_certfile is None:
-            print(
-                f"[gscroll] WARNING: server bound to {host} without TLS — "
-                "accessible beyond loopback. Use --tls-cert/--tls-key or restrict to trusted networks.",
-                flush=True,
-            )
-        else:
-            print(
-                f"[gscroll] Server bound to {host} with TLS enabled.",
-                flush=True,
-            )
-    server = ThreadingHTTPServer((host, port), GuildScrollRequestHandler)
-    if tls_certfile is not None and tls_keyfile is not None:
-        import ssl
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        # Restrict TLS 1.2 cipher suites to those providing forward secrecy.
-        # TLS 1.3 suites are always strong and managed separately by the ssl module.
-        ctx.set_ciphers(
-            "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20"
-            ":!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP"
+    import os
+
+    if host != "127.0.0.1" and os.environ.get("GUILD_SCROLL_ALLOW_REMOTE") not in {"1", "true", "yes"}:
+        raise ValueError(
+            "gscroll serve only supports 127.0.0.1 for safety. "
+            "Set GUILD_SCROLL_ALLOW_REMOTE=1 to allow remote binding (e.g. inside Docker)."
         )
-        ctx.load_cert_chain(certfile=tls_certfile, keyfile=tls_keyfile)
-        server.socket = ctx.wrap_socket(server.socket, server_side=True)
-    return server
+    return ThreadingHTTPServer((host, port), GuildScrollRequestHandler)
 
 
-def run_server(
-    host: str = "127.0.0.1",
-    port: int = 1551,
-    tls_certfile: str | None = None,
-    tls_keyfile: str | None = None,
-) -> None:
-    server = create_server(host=host, port=port, tls_certfile=tls_certfile, tls_keyfile=tls_keyfile)
-    scheme = "https" if tls_certfile else "http"
+def run_server(host: str = "127.0.0.1", port: int = 1551) -> None:
+    server = create_server(host=host, port=port)
     try:
-        print(f"[gscroll] Serving reports on {scheme}://{host}:{server.server_address[1]}")
+        print(f"[gscroll] Serving reports on http://{host}:{server.server_address[1]}")
         server.serve_forever()
     except KeyboardInterrupt:
         pass

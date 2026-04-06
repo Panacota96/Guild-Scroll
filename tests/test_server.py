@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import string
 import threading
@@ -9,8 +10,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 
 from guild_scroll.log_schema import CommandEvent, SessionMeta
-from guild_scroll.log_writer import JSONLWriter
-from guild_scroll.server import create_server
+from guild_scroll.web.app import create_server
 from guild_scroll.utils import iso_timestamp
 
 
@@ -33,13 +33,13 @@ def _make_session(sessions_dir, name):
         working_directory="/home/kali",
     )
 
-    with JSONLWriter(logs_dir / "session.jsonl") as writer:
-        writer.write(meta.to_dict())
-        writer.write(cmd.to_dict())
+    records = [meta.to_dict(), cmd.to_dict()]
+    payload = "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n"
+    (logs_dir / "session.jsonl").write_text(payload, encoding="utf-8")
 
 
-def _start_test_server(default_session=None):
-    server = create_server(default_session=default_session, port=0)
+def _start_test_server():
+    server = create_server(port=0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread
@@ -95,12 +95,12 @@ class TestServerRoutes:
         sessions_dir = isolated_sessions_dir / "sessions"
         _make_session(sessions_dir, "api-sess")
 
-        server, thread = _start_test_server(default_session="api-sess")
+        server, thread = _start_test_server()
         try:
             status, data = _request(server, "GET", "/api/session/api-sess")
             assert status == 200
             payload = json.loads(data)
-            assert payload["meta"]["session_name"] == "api-sess"
+            assert payload["session"]["session_name"] == "api-sess"
             assert len(payload["commands"]) == 1
             assert "nmap" in payload["commands"][0]["command"]
         finally:
@@ -112,7 +112,7 @@ class TestServerRoutes:
         sessions_dir = isolated_sessions_dir / "sessions"
         _make_session(sessions_dir, "report-sess")
 
-        server, thread = _start_test_server(default_session="report-sess")
+        server, thread = _start_test_server()
         try:
             status, data = _request(
                 server,
@@ -123,7 +123,7 @@ class TestServerRoutes:
             assert status == 200
             payload = json.loads(data)
             assert payload["format"] == "md"
-            assert "Tuned Report" in payload["content"]
+            assert "# Session: report-sess" in payload["content"]
         finally:
             server.shutdown()
             server.server_close()
@@ -133,7 +133,7 @@ class TestServerRoutes:
         sessions_dir = isolated_sessions_dir / "sessions"
         _make_session(sessions_dir, "note-sess")
 
-        server, thread = _start_test_server(default_session="note-sess")
+        server, thread = _start_test_server()
         try:
             status, data = _request(
                 server,
@@ -169,7 +169,7 @@ class TestServerRoutes:
         sessions_dir = isolated_sessions_dir / "sessions"
         _make_session(sessions_dir, "headers-sess")
 
-        server, thread = _start_test_server(default_session="headers-sess")
+        server, thread = _start_test_server()
         try:
             status_json, _, headers_json = _request_with_headers(server, "GET", "/api/sessions")
             assert status_json == 200
@@ -192,7 +192,14 @@ class TestServerRoutes:
         outside_dir = isolated_sessions_dir / "outside"
         outside_dir.mkdir(parents=True, exist_ok=True)
         link = sessions_dir / "evil-link"
-        link.symlink_to(outside_dir, target_is_directory=True)
+        try:
+            link.symlink_to(outside_dir, target_is_directory=True)
+        except OSError as exc:
+            if os.name == "nt":
+                import pytest
+
+                pytest.skip(f"Symlink privilege unavailable on this Windows host: {exc}")
+            raise
 
         server, thread = _start_test_server()
         try:
@@ -213,6 +220,163 @@ class TestServerRoutes:
                 raw = "".join(random.choice(alphabet) for _ in range(18))
                 status, _ = _request(server, "GET", f"/api/session/{raw}")
                 assert status in {400, 404}
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
+class TestCRUDEndpoints:
+    # ------------------------------------------------------------------ CREATE
+    def test_create_session_returns_201_and_creates_directory(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "POST", "/api/sessions", body={"name": "new-session"})
+            assert status == 201
+            payload = json.loads(data)
+            assert payload["session_name"] == "new-session"
+            assert (sessions_dir / "new-session" / "logs" / "session.jsonl").exists()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_create_session_409_on_name_conflict(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "existing-sess")
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "POST", "/api/sessions", body={"name": "existing-sess"})
+            assert status == 409
+            payload = json.loads(data)
+            assert "already exists" in payload["error"].lower()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_create_session_422_on_invalid_name(self, isolated_sessions_dir):
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "POST", "/api/sessions", body={"name": "../../evil"})
+            assert status == 422
+            payload = json.loads(data)
+            assert "invalid" in payload["error"].lower()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_create_session_422_if_name_missing(self, isolated_sessions_dir):
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "POST", "/api/sessions", body={})
+            assert status == 422
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    # ------------------------------------------------------------------ DELETE
+    def test_delete_session_returns_204_and_removes_directory(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "del-sess")
+        server, thread = _start_test_server()
+        try:
+            status, _ = _request(server, "DELETE", "/api/session/del-sess")
+            assert status == 204
+            assert not (sessions_dir / "del-sess").exists()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_delete_session_404_when_not_found(self, isolated_sessions_dir):
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "DELETE", "/api/session/no-such-sess")
+            assert status == 404
+            payload = json.loads(data)
+            assert "not found" in payload["error"].lower()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_delete_session_400_on_path_traversal(self, isolated_sessions_dir):
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "DELETE", "/api/session/../../etc")
+            assert status == 400
+            payload = json.loads(data)
+            assert "invalid" in payload["error"].lower()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    # ---------------------------------------------------------------- CONTINUE
+    def test_continue_session_returns_200_with_part_number(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "cont-sess")
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "POST", "/api/session/cont-sess/continue")
+            assert status == 200
+            payload = json.loads(data)
+            assert payload["part"] >= 2
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_continue_session_404_when_not_found(self, isolated_sessions_dir):
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "POST", "/api/session/no-such-sess/continue")
+            assert status == 404
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    # --------------------------------------------------------------- VALIDATE
+    def test_validate_session_returns_report(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "val-sess")
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "POST", "/api/session/val-sess/validate")
+            assert status == 200
+            payload = json.loads(data)
+            assert "valid" in payload
+            assert "errors" in payload
+            assert "warnings" in payload
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_validate_with_repair_flag(self, isolated_sessions_dir):
+        sessions_dir = isolated_sessions_dir / "sessions"
+        _make_session(sessions_dir, "repair-sess")
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "POST", "/api/session/repair-sess/validate?repair=true")
+            assert status == 200
+            payload = json.loads(data)
+            assert "repaired" in payload
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_validate_session_404_when_not_found(self, isolated_sessions_dir):
+        server, thread = _start_test_server()
+        try:
+            status, data = _request(server, "POST", "/api/session/no-such-sess/validate")
+            assert status == 404
         finally:
             server.shutdown()
             server.server_close()

@@ -2,7 +2,6 @@
 Click CLI: gscroll start | list | status | note | export | replay | search | tui | update
            join | share | import | serve
 """
-import errno
 import sys
 import click
 
@@ -77,17 +76,11 @@ def validate(session_name, repair):
         "\b\n"
         "Examples:\n"
         "  gscroll start htb-machine\n"
-        "  gscroll start htb-machine --mode assessment\n"
         "  gscroll start               # prompts for a name\n"
         "\n"
         "The session directory is created at ./guild_scroll/sessions/<name>/\n"
         "relative to your current working directory (like .git/).\n"
-        "Type 'exit' or Ctrl-D to stop the recording.\n"
-        "\n"
-        "Modes:\n"
-        "  ctf         Flexible security (default). HMAC integrity, standard permissions.\n"
-        "  assessment  Strict security. Mandatory HMAC, enforced file permissions (0o600/0o700),\n"
-        "              auto-signing on session end."
+        "Type 'exit' or Ctrl-D to stop the recording."
     )
 )
 @click.argument("session_name", required=False, default=None)
@@ -95,35 +88,23 @@ def validate(session_name, repair):
     "--join", "join_session", is_flag=True, default=False,
     help="Attach to an existing session as a new terminal part.",
 )
-@click.option(
-    "--mode", "mode", default=None,
-    type=click.Choice(["ctf", "assessment"], case_sensitive=False),
-    help="Session security mode. CTF is flexible; assessment enforces strict security. "
-         "Default from GUILD_SCROLL_MODE env var or 'ctf'.",
-)
-def start(session_name, join_session, mode):
+def start(session_name, join_session):
     """Start a new recording session.
 
     SESSION_NAME is optional; you will be prompted if omitted.
     Inside the session your prompt shows a colored [REC] indicator.
     Use --join to attach a second terminal to an existing session.
-    Use --mode to select security level: ctf (default) or assessment.
     """
     from guild_scroll.session import start_session
-    from guild_scroll.config import get_default_mode
-
-    if mode is None:
-        mode = get_default_mode()
 
     if not session_name:
         session_name = click.prompt("Session name", default="session")
 
-    mode_label = f" [{mode.upper()}]" if mode == "assessment" else ""
     if join_session:
-        click.echo(f"[REC] Joining session '{session_name}' as a new part{mode_label} — type 'exit' or Ctrl-D to stop.")
+        click.echo(f"[gscroll] Joining session '{session_name}' as a new part — type 'exit' or Ctrl-D to stop.")
     else:
-        click.echo(f"[REC] Starting session '{session_name}'{mode_label} — type 'exit' or Ctrl-D to stop.")
-    start_session(session_name, join=join_session, mode=mode)
+        click.echo(f"[gscroll] Starting session '{session_name}' — type 'exit' or Ctrl-D to stop.")
+    start_session(session_name, join=join_session)
     click.echo("[gscroll] Session ended and logs saved.")
 
 
@@ -139,14 +120,13 @@ def list_sessions():
     if not sessions:
         click.echo("No sessions found.")
         return
-    click.echo(f"{'NAME':<30} {'MODE':<12} {'START':<28} {'CMDS':>6}")
-    click.echo("-" * 80)
+    click.echo(f"{'NAME':<30} {'START':<28} {'CMDS':>6}")
+    click.echo("-" * 68)
     for s in sessions:
         name = s.get("session_name", "?")
-        mode = s.get("mode") or "ctf"
         start = s.get("start_time", "?")
         count = s.get("command_count", 0)
-        click.echo(f"{name:<30} {mode:<12} {start:<28} {count:>6}")
+        click.echo(f"{name:<30} {start:<28} {count:>6}")
 
 
 @cli.command(
@@ -164,8 +144,7 @@ def status():
     if not info:
         click.echo("No active session.")
         return
-    mode = info.get("mode") or "ctf"
-    click.echo(f"[REC] Active session: {info.get('session_name')} [{mode}]")
+    click.echo(f"Active session: {info.get('session_name')}")
     click.echo(f"  Started : {info.get('start_time')}")
     click.echo(f"  Commands: {info.get('command_count', 0)}")
 
@@ -197,8 +176,6 @@ def note(text, session_name, tags):
     from guild_scroll.session_loader import resolve_session
     from guild_scroll.log_schema import NoteEvent
     from guild_scroll.log_writer import JSONLWriter
-    from guild_scroll.integrity import load_session_key
-    from guild_scroll.crypto import is_encrypted, load_encryption_key, decrypt_file_bytes, encrypt_data
     from guild_scroll.utils import iso_timestamp
     from guild_scroll.config import SESSION_LOG_NAME
 
@@ -214,24 +191,8 @@ def note(text, session_name, tags):
         timestamp=iso_timestamp(),
         tags=list(tags),
     )
-    hmac_key = load_session_key(sess_dir)
-    enc_key = load_encryption_key(sess_dir)
-
-    if enc_key is not None and is_encrypted(log_file):
-        # Decrypt → append → re-encrypt
-        import json as _json
-        from guild_scroll.integrity import compute_event_hmac, should_sign
-        record = event.to_dict()
-        if hmac_key is not None and should_sign(record):
-            record = dict(record)
-            record["event_hmac"] = compute_event_hmac(hmac_key, record)
-        plaintext = decrypt_file_bytes(log_file, enc_key).decode("utf-8")
-        new_line = _json.dumps(record, ensure_ascii=False)
-        combined = plaintext.rstrip("\n") + "\n" + new_line + "\n"
-        log_file.write_bytes(encrypt_data(enc_key, combined.encode("utf-8")))
-    else:
-        with JSONLWriter(log_file, hmac_key=hmac_key) as writer:
-            writer.write(event.to_dict())
+    with JSONLWriter(log_file) as writer:
+        writer.write(event.to_dict())
     click.echo(f"[gscroll] Note added to session '{sess_dir.name}'.")
 
 
@@ -321,8 +282,6 @@ def export(session_name, fmt, output_path, part_num, writeup):
         "  gscroll search htb-machine --tool nmap --exit-code 0\n"
         "  gscroll search htb-machine --cwd /var/www\n"
         "  gscroll search htb-machine --phase exploit --exit-code 0\n"
-        "  gscroll search htb-machine --output-contains 'open port'\n"
-        "  gscroll search htb-machine --tool nmap --output-contains '80/tcp'\n"
         "\n"
         "  # Inside a recording session (session auto-detected):\n"
         "  gscroll search --phase post-exploit\n"
@@ -339,11 +298,7 @@ def export(session_name, fmt, output_path, part_num, writeup):
 )
 @click.option("--exit-code", "exit_code", default=None, type=int, help="Filter by exit code.")
 @click.option("--cwd", default=None, metavar="DIR", help="Filter by working directory (substring).")
-@click.option(
-    "--output-contains", "output_contains", default=None, metavar="TEXT",
-    help="Filter by captured command output (case-insensitive substring).",
-)
-def search(session_name, tool, phase, exit_code, cwd, output_contains):
+def search(session_name, tool, phase, exit_code, cwd):
     """Search and filter commands recorded in a session.
 
     SESSION_NAME is optional when inside a recording session.
@@ -359,7 +314,7 @@ def search(session_name, tool, phase, exit_code, cwd, output_contains):
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
-    filters = SearchFilter(tool=tool, phase=phase, exit_code=exit_code, cwd=cwd, output_contains=output_contains)
+    filters = SearchFilter(tool=tool, phase=phase, exit_code=exit_code, cwd=cwd)
     results = search_commands(session, filters)
 
     if not results:
@@ -491,10 +446,8 @@ def tui(session_name):
         "Examples:\n"
         "  gscroll serve\n"
         "  gscroll serve --port 1551\n"
-        "  gscroll serve --host 0.0.0.0\n"
         "\n"
-        "Defaults to 127.0.0.1. Use --host 0.0.0.0 to expose on all interfaces\n"
-        "(e.g. inside Exegol/Kali containers)."
+        "Serves the report UI on localhost only."
     )
 )
 @click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind.")
@@ -638,255 +591,6 @@ def import_session(archive_path):
         sys.exit(1)
 
     click.echo(f"[gscroll] Imported session '{name}'.")
-
-
-@cli.command(
-    epilog=(
-        "\b\n"
-        "Examples:\n"
-        "  gscroll serve\n"
-        "  gscroll serve --port 1661\n"
-        "  gscroll serve --host 0.0.0.0\n"
-        "  gscroll serve --tls-cert cert.pem --tls-key key.pem\n"
-        "\n"
-        "Defaults to 127.0.0.1. Use --host 0.0.0.0 to expose on all interfaces\n"
-        "(e.g. inside Exegol/Kali containers). No authentication is provided.\n"
-        "Use --tls-cert and --tls-key for HTTPS (TLS 1.2+).\n"
-    )
-)
-@click.option(
-    "--host", default="127.0.0.1", show_default=True, metavar="HOST",
-    help="Bind host (e.g. 0.0.0.0 for all interfaces).",
-)
-@click.option(
-    "--port", default=1551, show_default=True, type=int, metavar="PORT",
-    help="Bind port for the local web server.",
-)
-@click.option(
-    "--tls-cert", "tls_certfile", default=None, metavar="CERTFILE",
-    help="Path to TLS certificate file (PEM). Enables HTTPS with TLS 1.2+.",
-)
-@click.option(
-    "--tls-key", "tls_keyfile", default=None, metavar="KEYFILE",
-    help="Path to TLS private key file (PEM). Required with --tls-cert.",
-)
-def serve(host, port, tls_certfile, tls_keyfile):
-    """Serve the session viewer and JSON API.
-
-    Optionally enable TLS 1.2+ by providing --tls-cert and --tls-key.
-    """
-    from guild_scroll.web import create_server
-
-    if bool(tls_certfile) != bool(tls_keyfile):
-        click.echo("Error: --tls-cert and --tls-key must both be provided.", err=True)
-        sys.exit(1)
-
-    try:
-        server = create_server(
-            host=host, port=port,
-            tls_certfile=tls_certfile, tls_keyfile=tls_keyfile,
-        )
-    except ValueError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
-    except OSError as exc:
-        if exc.errno == errno.EADDRINUSE:
-            click.echo(f"Error: Port {port} already in use.", err=True)
-            sys.exit(1)
-        click.echo(f"Error starting server: {exc}", err=True)
-        sys.exit(1)
-
-    scheme = "https" if tls_certfile else "http"
-    click.echo(f"[gscroll] Serving on {scheme}://{host}:{server.server_port} (Ctrl-C to stop)")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        click.echo("[gscroll] Server stopped.")
-    finally:
-        server.server_close()
-
-
-_VALID_RESULTS = ("rooted", "compromised", "partial", "failed", "incomplete")
-
-
-@cli.command(
-    epilog=(
-        "\b\n"
-        "Examples:\n"
-        "  gscroll finalize htb-machine --result rooted\n"
-        "  gscroll finalize htb-machine --result compromised\n"
-        "\n"
-        "  # Inside a recording session (session auto-detected):\n"
-        "  gscroll finalize --result partial\n"
-        "\n"
-        f"Valid result values: {', '.join(_VALID_RESULTS)}\n"
-    )
-)
-@click.argument("session_name", required=False, default=None)
-@click.option(
-    "--result",
-    "result",
-    default=None,
-    type=click.Choice(list(_VALID_RESULTS), case_sensitive=False),
-    help="Session result: rooted, compromised, partial, failed, or incomplete.",
-)
-def finalize(session_name, result):
-    """Mark a session as finalized (ready for reporting).
-
-    SESSION_NAME is optional when inside a recording session.
-    Use --result to record the engagement outcome.
-    Once finalized, the session metadata is updated in-place.
-    """
-    import json
-    from guild_scroll.session_loader import resolve_session
-    from guild_scroll.config import SESSION_LOG_NAME
-
-    try:
-        sess_dir = resolve_session(session_name)
-    except FileNotFoundError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
-
-    log_path = sess_dir / "logs" / SESSION_LOG_NAME
-    if not log_path.exists():
-        click.echo(f"Error: Session log not found for '{sess_dir.name}'.", err=True)
-        sys.exit(1)
-
-    from guild_scroll.crypto import read_plaintext, is_encrypted, load_encryption_key, encrypt_data
-    content = read_plaintext(log_path)
-    rewritten: list[str] = []
-    found_meta = False
-    for line in content.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            record = json.loads(stripped)
-        except json.JSONDecodeError:
-            rewritten.append(stripped)
-            continue
-        if record.get("type") == "session_meta":
-            record["finalized"] = True
-            if result is not None:
-                record["result"] = result
-            found_meta = True
-        rewritten.append(json.dumps(record, ensure_ascii=False))
-
-    if not found_meta:
-        click.echo(f"Error: No session_meta record found in '{sess_dir.name}'.", err=True)
-        sys.exit(1)
-
-    new_content = "\n".join(rewritten) + "\n"
-    if is_encrypted(log_path):
-        enc_key = load_encryption_key(sess_dir)
-        if enc_key is not None:
-            log_path.write_bytes(encrypt_data(enc_key, new_content.encode("utf-8")))
-        else:
-            log_path.write_text(new_content, encoding="utf-8")
-    else:
-        log_path.write_text(new_content, encoding="utf-8")
-    result_str = f" (result: {result})" if result else ""
-    click.echo(f"[gscroll] Session '{sess_dir.name}' finalized{result_str}.")
-
-
-@cli.command(
-    epilog=(
-        "\b\n"
-        "Examples:\n"
-        "  gscroll sign htb-machine               # SHA-256 digest (no key)\n"
-        "  gscroll sign htb-machine --key op.key  # HMAC-SHA256 with key file\n"
-        "\n"
-        "  # Inside a recording session (session auto-detected):\n"
-        "  gscroll sign\n"
-    )
-)
-@click.argument("session_name", required=False, default=None)
-@click.option(
-    "--key", "key_file", default=None, metavar="KEYFILE",
-    help="Path to a key file for HMAC-SHA256 signing. Omit for plain SHA-256.",
-)
-def sign(session_name, key_file):
-    """Sign a session to establish a chain-of-trust baseline.
-
-    Computes a digest over the session log and writes ``logs/session.sig``
-    containing the algorithm, digest, timestamp, and operator.
-
-    Use --key to produce an HMAC-SHA256 signature instead of a plain SHA-256
-    digest for authenticated integrity checks.
-    """
-    from pathlib import Path
-    from guild_scroll.session_loader import resolve_session
-    from guild_scroll.signer import sign_session
-
-    try:
-        sess_dir = resolve_session(session_name)
-    except FileNotFoundError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
-
-    key_path = Path(key_file) if key_file else None
-    if key_path is not None and not key_path.exists():
-        click.echo(f"Error: key file not found: {key_path}", err=True)
-        sys.exit(1)
-
-    try:
-        metadata = sign_session(sess_dir, key_file=key_path)
-    except FileNotFoundError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
-
-    click.echo(f"[gscroll] Session '{sess_dir.name}' signed.")
-    click.echo(f"  algorithm : {metadata.algorithm}")
-    click.echo(f"  digest    : {metadata.digest}")
-    click.echo(f"  operator  : {metadata.operator}")
-    click.echo(f"  timestamp : {metadata.timestamp}")
-    click.echo(f"  sig file  : {sess_dir / 'logs' / 'session.sig'}")
-
-
-@cli.command(
-    epilog=(
-        "\b\n"
-        "Examples:\n"
-        "  gscroll verify htb-machine               # verify SHA-256 digest\n"
-        "  gscroll verify htb-machine --key op.key  # verify HMAC-SHA256\n"
-        "\n"
-        "  # Inside a recording session (session auto-detected):\n"
-        "  gscroll verify\n"
-        "\n"
-        "Exits with status 1 when the signature is missing or does not match."
-    )
-)
-@click.argument("session_name", required=False, default=None)
-@click.option(
-    "--key", "key_file", default=None, metavar="KEYFILE",
-    help="Path to the key file used when signing. Required for HMAC-SHA256 signatures.",
-)
-def verify(session_name, key_file):
-    """Verify a session's signature.
-
-    Recomputes the digest and compares it against the stored ``logs/session.sig``.
-    Exits with status 1 when the signature is missing, invalid, or does not match.
-    Designed for use in CI and operator workflows.
-    """
-    from pathlib import Path
-    from guild_scroll.session_loader import resolve_session
-    from guild_scroll.signer import verify_session
-
-    try:
-        sess_dir = resolve_session(session_name)
-    except FileNotFoundError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
-
-    key_path = Path(key_file) if key_file else None
-    if key_path is not None and not key_path.exists():
-        click.echo(f"Error: key file not found: {key_path}", err=True)
-        sys.exit(1)
-
-    ok, message = verify_session(sess_dir, key_file=key_path)
-    click.echo(f"[gscroll] {message}")
-    if not ok:
-        sys.exit(1)
 
 
 @cli.command(
