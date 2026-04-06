@@ -1,4 +1,5 @@
 """CLI tests using Click's test runner."""
+import ast
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -128,12 +129,41 @@ class TestUpdateCommand:
 
 
 class TestServeCommand:
+    def test_single_serve_definition(self):
+        cli_path = Path(__file__).resolve().parents[1] / "src" / "guild_scroll" / "cli.py"
+        source = cli_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        serve_defs = [
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "serve"
+        ]
+        assert len(serve_defs) == 1
+
     def test_serve_invokes_web_server(self, isolated_sessions_dir):
         runner = CliRunner()
         with patch("guild_scroll.web.app.run_server") as mock_run_server:
             result = runner.invoke(cli, ["serve", "--port", "1551"])
         assert result.exit_code == 0
         mock_run_server.assert_called_once_with(host="127.0.0.1", port=1551)
+
+    def test_serve_command_defined_once(self):
+        cli_path = Path(__file__).resolve().parent.parent / "src" / "guild_scroll" / "cli.py"
+        tree = ast.parse(cli_path.read_text())
+        serve_defs = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "serve"
+        ]
+        assert len(serve_defs) == 1
+
+        cli_command_decorators = [
+            dec
+            for dec in serve_defs[0].decorator_list
+            if isinstance(dec, ast.Call)
+            and isinstance(dec.func, ast.Attribute)
+            and isinstance(dec.func.value, ast.Name)
+            and dec.func.value.id == "cli"
+            and dec.func.attr == "command"
+        ]
+        assert len(cli_command_decorators) == 1
 
 
 class TestNoteCommand:
