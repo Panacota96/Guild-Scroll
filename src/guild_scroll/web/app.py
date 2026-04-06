@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import html
 import json
+import os
+import queue
 import re
 import shutil
 import socket
@@ -26,9 +30,17 @@ from guild_scroll.session import list_sessions
 from guild_scroll.session_loader import LoadedSession, load_session
 from guild_scroll.utils import generate_session_id, iso_timestamp, sanitize_session_name
 from guild_scroll.validator import repair_session, validate_session
+from guild_scroll.web.terminal import (
+    TERMINALS,
+    ShellNotFound,
+    TerminalAlreadyRunning,
+    TerminalNotFound,
+    TerminalNotSupported,
+)
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
 def _write_jsonl_record(log_path: Path, record: dict[str, object]) -> None:
@@ -57,6 +69,19 @@ def _query_value(params: dict[str, list[str]], key: str) -> str | None:
         return None
     value = values[0].strip()
     return value or None
+
+
+def _parse_part(params: dict[str, list[str]]) -> int:
+    raw = _query_value(params, "part")
+    if raw is None:
+        return 1
+    try:
+        part = int(raw)
+    except ValueError as exc:
+        raise ValueError("part must be a positive integer") from exc
+    if part < 1:
+        raise ValueError("part must be a positive integer")
+    return part
 
 
 def _parse_discovery_filters(params: dict[str, list[str]]) -> tuple[str | None, int]:
@@ -562,11 +587,94 @@ a {{ color: #8cc8ff; }}
 .discovery-summary {{ margin-top: 0.35rem; color: #edf4ff; word-break: break-word; }}
 .discovery-tags {{ margin-top: 0.25rem; color: #9eb8da; font-size: 0.78rem; word-break: break-word; }}
 .discovery-empty {{ margin: 0.8rem 0 0; color: #9eb8da; }}
+.terminal-panel {{ border: 1px solid #36567f; border-radius: 12px; background: linear-gradient(145deg, #101b2c, #0c1626); padding: 0.9rem; margin-bottom: 1rem; }}
+.terminal-header {{ display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }}
+.gs-terminal-btn {{ border: 1px solid #3d608d; background: #0e1a2c; color: #e9efff; padding: 0.4rem 0.8rem; border-radius: 8px; cursor: pointer; }}
+.gs-terminal-btn:hover {{ border-color: #52d0ff; background: #13243b; }}
+.terminal-output {{ background: #0b1020; border: 1px solid #334b70; border-radius: 8px; padding: 0.6rem; min-height: 220px; max-height: 320px; overflow: auto; white-space: pre-wrap; }}
+.terminal-actions {{ display: flex; gap: 0.5rem; align-items: center; margin-top: 0.55rem; }}
+.terminal-input {{ flex: 1; border: 1px solid #3d608d; background: #0e1a2c; color: #e9efff; padding: 0.45rem; border-radius: 6px; }}
 @media (max-width: 980px) {{
     .layout {{ grid-template-columns: 1fr; }}
     .discoveries-panel {{ position: static; }}
 }}
 </style>
+<script>
+const gsSessionPath = "{session_name}";
+let gsTerminalSocket = null;
+
+function gsSetTerminalButton(running) {{
+    const btn = document.getElementById("gs-terminal-btn");
+    if (!btn) {{ return; }}
+    btn.textContent = running ? "Stop Terminal" : "Open Terminal";
+}}
+
+function gsAppendTerminalOutput(text) {{
+    const el = document.getElementById("gs-terminal-output");
+    if (!el) {{ return; }}
+    el.textContent += text;
+    el.scrollTop = el.scrollHeight;
+}}
+
+async function gsStartTerminal() {{
+    try {{
+        const resp = await fetch(`/api/session/${{gsSessionPath}}/terminal/start`, {{ method: "POST" }});
+        const payload = await resp.json().catch(() => ({{}}));
+        if (!resp.ok) {{
+            const msg = payload.error ? payload.error : "Unable to start terminal.";
+            gsAppendTerminalOutput("[terminal] " + msg + "\\n");
+            return;
+        }}
+    }} catch (err) {{
+        gsAppendTerminalOutput("[terminal] Failed to start terminal.\\n");
+        return;
+    }}
+
+    const wsProto = window.location.protocol === "https:" ? "wss" : "ws";
+    const wsUrl = wsProto + "://" + window.location.host + "/ws/session/" + gsSessionPath + "/terminal";
+    gsTerminalSocket = new WebSocket(wsUrl);
+    gsTerminalSocket.onmessage = (event) => gsAppendTerminalOutput(event.data || "");
+    gsTerminalSocket.onclose = () => {{ gsTerminalSocket = null; gsSetTerminalButton(false); }};
+    gsTerminalSocket.onerror = () => {{ if (gsTerminalSocket) {{ gsTerminalSocket.close(); }} }};
+    gsTerminalSocket.onopen = () => gsSetTerminalButton(true);
+}}
+
+async function gsStopTerminal() {{
+    try {{
+        await fetch(`/api/session/${{gsSessionPath}}/terminal/stop`, {{ method: "POST" }});
+    }} catch (_) {{}}
+    if (gsTerminalSocket) {{
+        gsTerminalSocket.close();
+    }}
+    gsTerminalSocket = null;
+    gsSetTerminalButton(false);
+}}
+
+async function gsTerminalToggle() {{
+    if (gsTerminalSocket) {{
+        return gsStopTerminal();
+    }}
+    return gsStartTerminal();
+}}
+
+function gsSendTerminalInput() {{
+    const inputEl = document.getElementById("gs-terminal-input");
+    if (!inputEl) {{ return; }}
+    const value = inputEl.value;
+    if (!value) {{ return; }}
+    const payload = value.endsWith("\\n") ? value : value + "\\n";
+    if (gsTerminalSocket && gsTerminalSocket.readyState === WebSocket.OPEN) {{
+        gsTerminalSocket.send(payload);
+    }} else {{
+        fetch(`/api/session/${{gsSessionPath}}/terminal/write`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ input: payload }}),
+        }});
+    }}
+    inputEl.value = "";
+}}
+</script>
 </head>
 <body>
 <main class="page-shell">
@@ -578,6 +686,18 @@ a {{ color: #8cc8ff; }}
             <a class="action-pill" href="/session/{session_name}?{md_query}">Markdown preview</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
+        </div>
+    </section>
+
+    <section class="terminal-panel" aria-label="Live terminal">
+        <div class="terminal-header">
+            <h2>Live Terminal</h2>
+            <button type="button" id="gs-terminal-btn" class="gs-terminal-btn" onclick="gsTerminalToggle()">Open Terminal</button>
+        </div>
+        <pre id="gs-terminal-output" class="terminal-output" aria-live="polite"></pre>
+        <div class="terminal-actions">
+            <input type="text" id="gs-terminal-input" class="terminal-input" placeholder="Type a command and press Enter" onkeydown="if (event.key === 'Enter') {{ event.preventDefault(); gsSendTerminalInput(); }}" />
+            <button type="button" onclick="gsSendTerminalInput()">Send</button>
         </div>
     </section>
 
@@ -617,6 +737,14 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
+        if parsed.path.startswith("/ws/session/") and parsed.path.endswith("/terminal"):
+            session_name = parsed.path[len("/ws/session/"):-len("/terminal")].strip("/")
+            self._handle_terminal_websocket(session_name, params)
+            return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/terminal/read"):
+            session_name = parsed.path[len("/api/session/"):-len("/terminal/read")].strip("/")
+            self._handle_terminal_read(session_name, params)
+            return
         if parsed.path == "/":
             self._handle_index()
             return
@@ -653,6 +781,18 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/terminal/start"):
+            session_name = parsed.path[len("/api/session/"):-len("/terminal/start")].strip("/")
+            self._handle_terminal_start(session_name, params)
+            return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/terminal/write"):
+            session_name = parsed.path[len("/api/session/"):-len("/terminal/write")].strip("/")
+            self._handle_terminal_write(session_name, params)
+            return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/terminal/stop"):
+            session_name = parsed.path[len("/api/session/"):-len("/terminal/stop")].strip("/")
+            self._handle_terminal_stop(session_name, params)
+            return
         if parsed.path == "/api/sessions":
             self._handle_create_session()
             return
@@ -709,6 +849,233 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 "assets": [asset.to_dict() for asset in session.assets],
             }
         )
+
+    def _handle_terminal_start(self, raw_name: str, params: dict[str, list[str]]) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+        try:
+            part = _parse_part(params)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+
+        try:
+            proc = TERMINALS.start(session_name, part=part)
+        except FileNotFoundError:
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+        except TerminalAlreadyRunning:
+            self._send_json({"error": "Terminal already running"}, status=409)
+            return
+        except TerminalNotSupported as exc:
+            self._send_json({"error": str(exc)}, status=501)
+            return
+        except ShellNotFound as exc:
+            self._send_json({"error": str(exc)}, status=500)
+            return
+
+        self._send_json({"started": True, "pid": proc.pid, "part": part})
+
+    def _handle_terminal_read(self, raw_name: str, params: dict[str, list[str]]) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+        try:
+            part = _parse_part(params)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+
+        alive, output = TERMINALS.read(session_name, part=part)
+        self._send_json({"alive": bool(alive), "output": output})
+
+    def _handle_terminal_write(self, raw_name: str, params: dict[str, list[str]]) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+        try:
+            part = _parse_part(params)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+
+        body = self._read_json_body()
+        if not isinstance(body, dict):
+            self._send_json({"error": "Invalid request body"}, status=400)
+            return
+        payload = str(body.get("input", ""))
+        if not payload:
+            self._send_json({"error": "Input is required"}, status=400)
+            return
+
+        try:
+            TERMINALS.write(session_name, payload, part=part)
+        except TerminalNotFound:
+            self._send_json({"error": "No active terminal"}, status=404)
+            return
+        self._send_json({"ok": True})
+
+    def _handle_terminal_stop(self, raw_name: str, params: dict[str, list[str]]) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+        try:
+            part = _parse_part(params)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+
+        try:
+            TERMINALS.stop(session_name, part=part)
+        except TerminalNotFound:
+            self._send_json({"error": "No active terminal"}, status=404)
+            return
+        self._send_json({"stopped": True})
+
+    def _handle_terminal_websocket(self, raw_name: str, params: dict[str, list[str]]) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_text("Invalid session name", status=400)
+            return
+        try:
+            part = _parse_part(params)
+        except ValueError as exc:
+            self._send_text(str(exc), status=400)
+            return
+
+        terminal = TERMINALS.get(session_name, part=part)
+        if terminal is None:
+            self._send_text("No active terminal", status=404)
+            return
+
+        upgrade = self.headers.get("Upgrade", "").lower()
+        if upgrade != "websocket":
+            self._send_text("Upgrade header required", status=400)
+            return
+        key = self.headers.get("Sec-WebSocket-Key")
+        if not key:
+            self._send_text("Missing Sec-WebSocket-Key", status=400)
+            return
+
+        accept = base64.b64encode(
+            hashlib.sha1((key + _WS_MAGIC).encode("utf-8")).digest()
+        ).decode("utf-8")
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        self._serve_terminal_socket(terminal)
+
+    def _serve_terminal_socket(self, terminal) -> None:
+        conn = self.connection
+        conn.settimeout(0.2)
+        subscriber = terminal.add_subscriber()
+        try:
+            self._flush_terminal_output(subscriber)
+            while True:
+                try:
+                    opcode, payload = self._read_ws_frame()
+                except TimeoutError:
+                    if not terminal.is_alive():
+                        break
+                    self._flush_terminal_output(subscriber)
+                    continue
+                if opcode is None:
+                    break
+                if opcode == 0x8:
+                    break
+                if opcode == 0x1:
+                    text = payload.decode("utf-8", errors="replace")
+                    try:
+                        terminal.write(text)
+                    except TerminalNotFound:
+                        break
+                elif opcode == 0x9:  # ping
+                    self._send_ws_frame(b"", opcode=0xA)
+                self._flush_terminal_output(subscriber)
+                if not terminal.is_alive():
+                    break
+            self._flush_terminal_output(subscriber)
+        finally:
+            terminal.remove_subscriber(subscriber)
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self.close_connection = True
+
+    def _send_ws_frame(self, payload: bytes, opcode: int = 0x1) -> None:
+        length = len(payload)
+        frame = bytearray()
+        frame.append(0x80 | (opcode & 0x0F))
+        if length < 126:
+            frame.append(length)
+        elif length < (1 << 16):
+            frame.append(126)
+            frame.extend(length.to_bytes(2, "big"))
+        else:
+            frame.append(127)
+            frame.extend(length.to_bytes(8, "big"))
+        frame.extend(payload)
+        try:
+            self.connection.sendall(frame)
+        except Exception:
+            pass
+
+    def _read_ws_frame(self) -> tuple[int | None, bytes]:
+        try:
+            header = self.connection.recv(2)
+        except socket.timeout as exc:
+            raise TimeoutError from exc
+        if not header or len(header) < 2:
+            return None, b""
+        b1, b2 = header
+        opcode = b1 & 0x0F
+        masked = b2 & 0x80
+        length = b2 & 0x7F
+        if length == 126:
+            ext = self.connection.recv(2)
+            length = int.from_bytes(ext, "big")
+        elif length == 127:
+            ext = self.connection.recv(8)
+            length = int.from_bytes(ext, "big")
+
+        mask_key = b""
+        if masked:
+            mask_key = self.connection.recv(4)
+
+        payload = b""
+        remaining = length
+        while remaining > 0:
+            chunk = self.connection.recv(remaining)
+            if not chunk:
+                break
+            payload += chunk
+            remaining -= len(chunk)
+
+        if masked and mask_key:
+            payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+        return opcode, payload
+
+    def _flush_terminal_output(self, subscriber: queue.SimpleQueue[str]) -> None:
+        while True:
+            try:
+                chunk = subscriber.get_nowait()
+            except queue.Empty:
+                break
+            if not chunk:
+                continue
+            if isinstance(chunk, str):
+                payload = chunk.encode("utf-8")
+            else:
+                payload = chunk
+            self._send_ws_frame(payload, opcode=0x1)
 
     def _handle_report(self, raw_name: str, params: dict[str, list[str]]) -> None:
         try:
