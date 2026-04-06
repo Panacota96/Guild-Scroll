@@ -88,3 +88,57 @@ class TestExtractCommandOutputs:
         outputs = extract_command_outputs(f)
         assert len(outputs) == 1
         assert "\r" not in outputs[0]
+
+    def test_modern_prompt_chevron(self, tmp_path):
+        """Prompts ending with ❯ (Oh My Zsh, Powerlevel10k) should work."""
+        f = tmp_path / "raw_io.log"
+        content = (
+            b"[REC] session \xe2\x9d\xaf ping 8.8.8.8\nPING 8.8.8.8\n"
+            b"[REC] session \xe2\x9d\xaf gscroll status\nActive session: demo\n"
+            b"[REC] session \xe2\x9d\xaf exit\n"
+        )
+        f.write_bytes(content)
+        outputs = extract_command_outputs(f)
+        assert len(outputs) == 2
+        assert "PING 8.8.8.8" in outputs[0]
+        assert "Active session: demo" in outputs[1]
+
+    def test_modern_prompt_arrow(self, tmp_path):
+        """Prompts ending with ➜ (Oh My Zsh robbyrussell) should work."""
+        f = tmp_path / "raw_io.log"
+        content = (
+            b"[REC] session \xe2\x9e\x9c whoami\ndaviv\n"
+            b"[REC] session \xe2\x9e\x9c exit\n"
+        )
+        f.write_bytes(content)
+        outputs = extract_command_outputs(f)
+        assert len(outputs) == 1
+        assert "daviv" in outputs[0]
+
+    def test_unknown_prompt_with_output_included(self, tmp_path):
+        """When the prompt terminator is unrecognised, segments with output are kept."""
+        f = tmp_path / "raw_io.log"
+        # Prompt uses a custom glyph that is not in any known set
+        content = (
+            b"[REC] s \xc2\xbb id\nuid=1000\n"   # » id  → has output → keep
+            b"[REC] s \xc2\xbb whoami\ndaviv\n"  # » whoami → has output → keep
+            b"[REC] s \xc2\xbb exit\n"
+        )
+        f.write_bytes(content)
+        outputs = extract_command_outputs(f)
+        assert len(outputs) == 2
+        assert "uid=1000" in outputs[0]
+        assert "daviv" in outputs[1]
+
+    def test_unknown_prompt_empty_enter_skipped(self, tmp_path):
+        """When the prompt terminator is unrecognised, empty segments are still skipped."""
+        f = tmp_path / "raw_io.log"
+        content = (
+            b"[REC] s \xc2\xbb \n"              # empty Enter → no output → skip
+            b"[REC] s \xc2\xbb id\nuid=1000\n"  # real command → keep
+            b"[REC] s \xc2\xbb exit\n"
+        )
+        f.write_bytes(content)
+        outputs = extract_command_outputs(f)
+        assert len(outputs) == 1
+        assert "uid=1000" in outputs[0]

@@ -71,6 +71,6 @@ spec:
       volumes:
       - name: guild-scroll-sessions
         persistentVolumeClaim:
-          claimName: guild-scroll-sessions-pvc
+          claimName: guild-scroll-sessions
       restartPolicy: Always
       terminationGracePeriodSeconds: 30

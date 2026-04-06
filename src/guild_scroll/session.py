@@ -18,8 +18,12 @@ from guild_scroll.config import (
     HOOK_EVENTS_NAME,
     SESSION_LOG_NAME,
     PARTS_DIR_NAME,
+    VALID_MODES,
+    get_default_mode,
 )
 from guild_scroll.hooks import create_hook_dir, detect_shell
+from guild_scroll.integrity import generate_session_key, load_session_key
+from guild_scroll.crypto import generate_encryption_key, load_encryption_key, encrypt_file
 from guild_scroll.log_schema import SessionMeta, CommandEvent, AssetEvent
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.recorder import start_recording
@@ -34,6 +38,18 @@ def _session_dir(session_name: str) -> Path:
     return get_sessions_dir() / session_name
 
 
+def _session_root_from_logs_dir(logs_dir: Path, part: int) -> Path:
+    """Return the top-level session directory given a logs directory and part number.
+
+    Part 1 keeps logs at ``{sess_dir}/logs/``.
+    Parts 2+ keep logs at ``{sess_dir}/parts/{N}/logs/``.
+    """
+    if part == 1:
+        return logs_dir.parent
+    # parts/{N}/logs → parent = parts/{N}, parent = parts, parent = sess_dir
+    return logs_dir.parent.parent.parent
+
+
 def _detect_operator() -> Optional[str]:
     """Return current operator identity from environment, if available."""
     for key in ("USER", "LOGNAME", "USERNAME"):
@@ -43,13 +59,23 @@ def _detect_operator() -> Optional[str]:
     return None
 
 
-def start_session(raw_name: str, join: bool = False) -> None:
-    """
-    Create the session directory tree, inject hooks, launch script, finalize.
-    Blocks until the user types `exit` or Ctrl-D.
+def start_session(raw_name: str, join: bool = False, mode: Optional[str] = None) -> None:
+    """Create the session directory tree, inject hooks, launch script, finalize.
 
-    If join=True, attach to an existing session as a new numbered part.
+    Blocks until the user types ``exit`` or Ctrl-D.
+
+    Parameters
+    ----------
+    raw_name:
+        User-supplied session name (will be sanitized).
+    join:
+        If *True*, attach to an existing session as a new numbered part.
+    mode:
+        ``'ctf'`` (default) or ``'assessment'``.  Assessment mode enforces
+        strict file permissions and mandatory HMAC integrity.
     """
+    if mode is None:
+        mode = get_default_mode()
     name = sanitize_session_name(raw_name)
     sess_dir = _session_dir(name)
 
@@ -73,6 +99,10 @@ def start_session(raw_name: str, join: bool = False) -> None:
     for d in (logs_dir, assets_dir, screenshots_dir):
         d.mkdir(parents=True, exist_ok=True)
 
+    # Assessment mode: enforce strict directory permissions
+    if mode == "assessment":
+        _enforce_dir_permissions(sess_dir)
+
     raw_io_path = logs_dir / RAW_IO_LOG_NAME
     timing_path = logs_dir / TIMING_LOG_NAME
     hook_events_path = logs_dir / HOOK_EVENTS_NAME
@@ -92,15 +122,23 @@ def start_session(raw_name: str, join: bool = False) -> None:
         hostname=socket.gethostname(),
         platform=platform,
         operator=_detect_operator(),
+        mode=mode,
     )
     final_log = logs_dir / SESSION_LOG_NAME
-    with JSONLWriter(final_log) as writer:
+    hmac_key = generate_session_key(sess_dir)
+    generate_encryption_key(sess_dir)
+    with JSONLWriter(final_log, hmac_key=hmac_key) as writer:
         writer.write(meta.to_dict())
+
+    # Assessment mode: enforce file permissions on key and log
+    if mode == "assessment":
+        _enforce_file_permissions(sess_dir / "session.key")
+        _enforce_file_permissions(final_log)
 
     try:
         start_recording(raw_io_path, timing_path, hook_dir, hook_events_path, session_name=name, shell=shell)
     finally:
-        finalize_session(name, session_id, logs_dir, assets_dir)
+        finalize_session(name, session_id, logs_dir, assets_dir, mode=mode)
         shutil.rmtree(str(hook_dir), ignore_errors=True)
 
 
@@ -134,7 +172,8 @@ def _start_part(session_name: str, sess_dir: Path) -> None:
         operator=_detect_operator(),
     )
     part_log = part_logs_dir / SESSION_LOG_NAME
-    with JSONLWriter(part_log) as writer:
+    hmac_key = load_session_key(sess_dir)
+    with JSONLWriter(part_log, hmac_key=hmac_key) as writer:
         writer.write(part_meta.to_dict())
 
     env_part = str(next_part)
@@ -159,16 +198,45 @@ def _detect_platform_safe() -> Optional[str]:
         return None
 
 
+def _enforce_dir_permissions(sess_dir: Path) -> None:
+    """Set strict permissions (0o700) on session directory tree for assessment mode."""
+    try:
+        sess_dir.chmod(0o700)
+        for d in sess_dir.iterdir():
+            if d.is_dir():
+                d.chmod(0o700)
+    except OSError:
+        pass
+
+
+def _enforce_file_permissions(file_path: Path) -> None:
+    """Set strict permissions (0o600) on a file for assessment mode."""
+    try:
+        if file_path.exists():
+            file_path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _read_session_mode(sess_dir: Path) -> Optional[str]:
+    """Read the mode from session metadata, return None if not set."""
+    log_file = sess_dir / "logs" / SESSION_LOG_NAME
+    meta = _read_session_meta(log_file)
+    return meta.get("mode") if meta else None
+
+
 def finalize_session(
     name: str,
     session_id: str,
     logs_dir: Path,
     assets_dir: Path,
     part: int = 1,
+    mode: Optional[str] = None,
 ) -> None:
     """
     Merge hook events into the final session.jsonl.
     Copies asset files detected during the session.
+    In assessment mode, auto-signs the session and enforces file permissions.
     """
     hook_events_path = logs_dir / HOOK_EVENTS_NAME
     final_log = logs_dir / SESSION_LOG_NAME
@@ -186,7 +254,8 @@ def finalize_session(
                     continue
 
         # Re-open final log in append mode
-        writer = JSONLWriter(final_log)
+        _hmac_key = load_session_key(_session_root_from_logs_dir(logs_dir, part))
+        writer = JSONLWriter(final_log, hmac_key=_hmac_key)
 
         for evt in events:
             etype = evt.get("type")
@@ -218,6 +287,28 @@ def finalize_session(
         writer.close()
         _patch_session_meta(final_log, iso_timestamp(), command_count)
 
+        # Encrypt sensitive log files at rest
+        sess_root = _session_root_from_logs_dir(logs_dir, part)
+        enc_key = load_encryption_key(sess_root)
+        if enc_key is not None:
+            encrypt_file(final_log, enc_key)
+            raw_io_path = logs_dir / RAW_IO_LOG_NAME
+            if raw_io_path.exists():
+                encrypt_file(raw_io_path, enc_key)
+
+        # Assessment mode: auto-sign and enforce permissions
+        if mode is None:
+            mode = _read_session_mode(sess_root)
+        if mode == "assessment":
+            try:
+                from guild_scroll.signer import sign_session
+                sign_session(sess_root)
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "assessment auto-sign failed: %s", exc
+                )
+            _enforce_file_permissions(final_log)
+
         # Clean up intermediate hook events
         try:
             hook_events_path.unlink()
@@ -239,7 +330,8 @@ def _get_finalize_lock(log_path: Path) -> threading.Lock:
 def _read_command_count(log_path: Path) -> int:
     if not log_path.exists():
         return 0
-    for line in log_path.read_text(encoding="utf-8").splitlines():
+    from guild_scroll.crypto import read_plaintext
+    for line in read_plaintext(log_path).splitlines():
         line = line.strip()
         if not line:
             continue
@@ -255,8 +347,9 @@ def _read_command_count(log_path: Path) -> int:
 def _count_command_records(log_path: Path) -> int:
     if not log_path.exists():
         return 0
+    from guild_scroll.crypto import read_plaintext
     count = 0
-    for line in log_path.read_text(encoding="utf-8").splitlines():
+    for line in read_plaintext(log_path).splitlines():
         line = line.strip()
         if not line:
             continue
@@ -321,7 +414,9 @@ def list_sessions() -> list[dict]:
 
 def _read_session_meta(log_file: Path) -> Optional[dict]:
     try:
-        for line in log_file.read_text(encoding="utf-8").splitlines():
+        from guild_scroll.crypto import read_plaintext
+        content = read_plaintext(log_file)
+        for line in content.splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -331,6 +426,94 @@ def _read_session_meta(log_file: Path) -> Optional[dict]:
     except (json.JSONDecodeError, OSError):
         pass
     return None
+
+
+def delete_session(session_name: str) -> None:
+    """Permanently delete a session directory and all associated data.
+
+    Validates that the resolved session directory is within the configured
+    sessions root before removing anything.
+    """
+    sessions_dir = get_sessions_dir()
+    sess_dir = sessions_dir / session_name
+    try:
+        resolved_sessions_dir = sessions_dir.resolve()
+        resolved_sess_dir = sess_dir.resolve(strict=False)
+        resolved_sess_dir.relative_to(resolved_sessions_dir)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Invalid session name: {session_name!r}") from exc
+    if not resolved_sess_dir.exists():
+        raise FileNotFoundError(f"Session not found: {session_name!r}")
+    shutil.rmtree(str(resolved_sess_dir))
+
+
+def close_session(session_name: str) -> dict[str, object]:
+    """
+    Mark a session as closed by setting end_time (if missing) and finalized.
+
+    Returns a summary dict containing the session name, end_time, and finalized flag.
+    """
+    sessions_dir = get_sessions_dir()
+    sess_dir = sessions_dir / session_name
+    try:
+        resolved_sessions_dir = sessions_dir.resolve()
+        resolved_sess_dir = sess_dir.resolve(strict=False)
+        resolved_sess_dir.relative_to(resolved_sessions_dir)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Invalid session name: {session_name!r}") from exc
+
+    log_path = resolved_sess_dir / "logs" / SESSION_LOG_NAME
+    if not log_path.exists():
+        raise FileNotFoundError(f"Session not found: {session_name!r}")
+
+    from guild_scroll.crypto import (
+        encrypt_data,
+        is_encrypted,
+        load_encryption_key,
+        read_plaintext,
+    )
+
+    if is_encrypted(log_path) and load_encryption_key(resolved_sess_dir) is None:
+        raise PermissionError(
+            f"Session log for {session_name!r} is encrypted and the encryption key is unavailable"
+        )
+
+    content = read_plaintext(log_path)
+    now = iso_timestamp()
+    rewritten: list[str] = []
+    end_time = None
+    found_meta = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            record = json.loads(stripped)
+        except json.JSONDecodeError:
+            rewritten.append(stripped)
+            continue
+        if record.get("type") == "session_meta":
+            found_meta = True
+            if not record.get("end_time"):
+                record["end_time"] = now
+            end_time = record.get("end_time") or now
+            record["finalized"] = True
+        rewritten.append(json.dumps(record, ensure_ascii=False))
+
+    if not found_meta:
+        raise ValueError(f"No session_meta record found for {session_name!r}")
+
+    new_content = "\n".join(rewritten) + "\n"
+    if is_encrypted(log_path):
+        enc_key = load_encryption_key(resolved_sess_dir)
+        if enc_key is not None:
+            log_path.write_bytes(encrypt_data(enc_key, new_content.encode("utf-8")))
+        else:
+            log_path.write_text(new_content, encoding="utf-8")
+    else:
+        log_path.write_text(new_content, encoding="utf-8")
+
+    return {"session": session_name, "end_time": end_time, "finalized": True}
 
 
 def get_session_status() -> Optional[dict]:

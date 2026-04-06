@@ -34,14 +34,15 @@ docker run guild-scroll:latest gscroll list
 
 ### `Dockerfile.kali`
 
-**Purpose**: Builds the Kali Linux container with Guild Scroll CLI and zsh recording hooks.
+**Purpose**: Builds the Debian-based container for Guild Scroll CLI and zsh recording hooks. This is a convenience image for CLI workflows, not the official Kali base-image variant.
 
 **Key Features**:
-- Based on official `kalilinux/kali:latest`
+- Based on `debian:bookworm-slim`
 - Installs zsh as default shell
-- Pre-installs common pentesting tools (curl, wget, git, tmux, vim, nano)
+- Pre-installs common CLI/pentesting utilities (curl, wget, git, tmux, vim, nano)
 - Additional tools can be added per use case
-- Copies full Guild Scroll source (assumes volume mount or COPY in CI)
+- Includes Guild Scroll for containerized CLI workflows on a Debian base
+- Use `Dockerfile.kali.official` if you specifically want the official Kali-based variant and its upstream tooling/auth expectations
 
 **Build Command**:
 ```bash
@@ -100,12 +101,13 @@ docker run guild-scroll:latest gscroll list
 **Output** (in container):
 ```
 ╔════════════════════════════════════════════╗
-║    Guild Scroll - Kali Recorder Active     ║
+║     Guild Scroll - Kali Recorder Ready     ║
 ╚════════════════════════════════════════════╝
 
 📝 Session Name: kali-session-20260403-143022
 📁 Session Path: /work/guild_scroll/sessions/kali-session-20260403-143022
-🔴 [REC] Recording in progress
+⏸️  Recording not started yet
+▶️  Run `gscroll start` to begin recording
 ```
 
 ---

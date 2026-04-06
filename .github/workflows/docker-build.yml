@@ -74,7 +74,7 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}
           tags: |
             type=ref,event=branch
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=sha-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
@@ -115,15 +115,28 @@ jobs:
           - guild-scroll-kali
 
     steps:
+      - name: Get short SHA
+        id: short_sha
+        run: echo "sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Determine image tag
+        id: image_tag
+        run: |
+          if [ "${{ github.ref_name }}" = "${{ github.event.repository.default_branch }}" ]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          else
+            echo "tag=sha-${{ steps.short_sha.outputs.sha }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ steps.image_tag.outputs.tag }}
           format: 'sarif'
           output: 'trivy-${{ matrix.image }}.sarif'
 
       - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-${{ matrix.image }}.sarif'
 
@@ -131,6 +144,9 @@ jobs:
     name: Test Docker Compose
     runs-on: ubuntu-latest
     needs: build
+    env:
+      GUILD_SCROLL_APP_IMAGE: guild-scroll:test
+      GUILD_SCROLL_RECORDER_IMAGE: guild-scroll-kali:test
     
     steps:
       - name: Checkout code
@@ -139,21 +155,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build images for testing
-        run: |
-          docker buildx build -t guild-scroll:test -f docker/Dockerfile.guild-scroll --load .
-          docker buildx build -t guild-scroll-kali:test -f docker/Dockerfile.kali --load .
-
-      - name: Start containers with Docker Compose
-        run: docker-compose up -d --timeout 30
-        env:
-          COMPOSE_FILE: docker-compose.yml
+      - name: Build and start containers with Docker Compose
+        run: docker compose up -d --build --timeout 60
 
       - name: Wait for services
         run: |
           echo "Waiting for Guild Scroll app to be healthy..."
           for i in {1..30}; do
-            if docker-compose exec -T guild-scroll-app curl -f http://localhost:8080/api/sessions; then
+            if docker compose exec -T guild-scroll-app curl -f http://localhost:8080/api/sessions; then
               echo "Guild Scroll app is healthy!"
               exit 0
             fi
@@ -161,22 +170,22 @@ jobs:
             sleep 2
           done
           echo "Guild Scroll app did not become healthy"
-          docker-compose logs
+          docker compose logs
           exit 1
 
       - name: Test Kali container
         run: |
           echo "Testing Kali container..."
-          docker-compose exec -T kali-recorder echo "✓ Kali container is responsive"
-          docker-compose exec -T kali-recorder gscroll list
+          docker compose exec -T kali-recorder echo "✓ Kali container is responsive"
+          docker compose exec -T kali-recorder gscroll list
 
       - name: Verify session volume
         run: |
-          docker-compose exec -T guild-scroll-app ls -la /work/guild_scroll/sessions/ || true
+          docker compose exec -T guild-scroll-app ls -la /work/guild_scroll/sessions/ || true
 
       - name: Clean up
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
 
   k8s-validate:
     name: Validate Kubernetes Manifests
@@ -186,17 +195,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up kubeval
+      - name: Set up kubeconform
         run: |
-          wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
-          tar xf kubeval-linux-amd64.tar.gz
-          mv kubeval /usr/local/bin/
+          curl -sSLo kubeconform.tar.gz https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform.tar.gz
+          mv kubeconform /usr/local/bin/
 
       - name: Validate Kubernetes manifests
         run: |
           for file in k8s/*.yaml; do
+            # Skip kustomization.yaml — it's a Kustomize config, not a standard K8s resource
+            if [[ "$file" == *"kustomization.yaml" ]]; then
+              echo "Skipping $file (kustomize config)"
+              continue
+            fi
             echo "Validating $file..."
-            kubeval "$file" || true
+            kubeconform -strict "$file"
           done
 
       - name: Validate kustomization
@@ -214,7 +228,15 @@ jobs:
     steps:
       - name: Check job statuses
         run: |
-          if [ "${{ needs.markdown-links.result }}" == "failure" ] || [ "${{ needs.build.result }}" == "failure" ] || [ "${{ needs.test-compose.result }}" == "failure" ] || [ "${{ needs.k8s-validate.result }}" == "failure" ]; then
+          echo "markdown-links: ${{ needs.markdown-links.result }}"
+          echo "build:          ${{ needs.build.result }}"
+          echo "test-compose:   ${{ needs.test-compose.result }}"
+          echo "k8s-validate:   ${{ needs.k8s-validate.result }}"
+
+          if [ "${{ needs.markdown-links.result }}" == "failure" ] || \
+             [ "${{ needs.build.result }}" == "failure" ] || \
+             [ "${{ needs.test-compose.result }}" == "failure" ] || \
+             [ "${{ needs.k8s-validate.result }}" == "failure" ]; then
             echo "❌ Pipeline failed"
             exit 1
           else

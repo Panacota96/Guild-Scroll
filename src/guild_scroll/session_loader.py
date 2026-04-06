@@ -63,12 +63,20 @@ def _session_name_from_log_file(log_file: Path) -> str:
 
 
 def _parse_jsonl(log_file: Path, strict: bool = False) -> list[dict]:
-    """Read a JSONL file, optionally failing fast on invalid lines."""
+    """Read a JSONL file, optionally failing fast on invalid lines.
+
+    Transparently decrypts files that were encrypted with AES-256-GCM.
+    """
     if not log_file.exists():
         return []
+    from guild_scroll.crypto import read_plaintext
+    try:
+        content = read_plaintext(log_file)
+    except Exception:
+        content = log_file.read_text(encoding="utf-8")
     records = []
     skipped_lines = 0
-    for line_number, line in enumerate(log_file.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(content.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue

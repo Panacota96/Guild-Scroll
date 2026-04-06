@@ -54,15 +54,26 @@ function Check-Requirements {
     $dockerVersion = docker --version
     Write-Success "Docker is installed ($dockerVersion)"
     
-    # Check Docker Compose
-    $compose = Get-Command docker-compose -ErrorAction SilentlyContinue
-    if (-not $compose) {
-        Write-Error-Custom "Docker Compose is not installed."
-        Write-Host "  It should come with Docker Desktop for Windows"
-        exit 1
+    # Support both "docker compose" (v2 plugin) and legacy "docker-compose" binary
+    $script:DOCKER_COMPOSE = $null
+    try {
+        & docker compose version 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "docker compose not available" }
+        $script:DOCKER_COMPOSE = @("docker", "compose")
+        $composeVersion = docker compose version 2>&1
+        Write-Success "Docker Compose is available ($composeVersion)"
+    } catch {
+        $compose = Get-Command docker-compose -ErrorAction SilentlyContinue
+        if ($compose) {
+            $script:DOCKER_COMPOSE = @("docker-compose")
+            $composeVersion = docker-compose --version
+            Write-Success "Docker Compose is available ($composeVersion)"
+        } else {
+            Write-Error-Custom "Docker Compose is not installed."
+            Write-Host "  It should come with Docker Desktop for Windows"
+            exit 1
+        }
     }
-    $composeVersion = docker-compose --version
-    Write-Success "Docker Compose is installed ($composeVersion)"
     
     # Check if Docker daemon is running
     try {
@@ -96,13 +107,14 @@ function Start-Containers {
     Set-Location $projectRoot
     
     Try {
-        docker-compose up -d
+        & $script:DOCKER_COMPOSE up -d
+        $composeCmd = $script:DOCKER_COMPOSE -join ' '
         Write-Success "Containers started successfully!"
         Write-Host ""
         Write-Host "Next steps:" -ForegroundColor $colors['White']
         Write-Info "Open web UI: http://localhost:8080"
-        Write-Info "Kali shell: docker-compose exec kali-recorder zsh"
-        Write-Info "View logs: docker-compose logs -f"
+        Write-Info "Kali shell: $composeCmd exec kali-recorder zsh"
+        Write-Info "View logs: $composeCmd logs -f"
     } Catch {
         Write-Error-Custom "Failed to start containers"
         Write-Host $_.Exception.Message
@@ -115,7 +127,7 @@ function Stop-Containers {
     Set-Location $projectRoot
     
     Try {
-        docker-compose down
+        & $script:DOCKER_COMPOSE down
         Write-Success "Containers stopped"
     } Catch {
         Write-Error-Custom "Failed to stop containers"
@@ -131,13 +143,13 @@ function Kali-Shell {
     Set-Location $projectRoot
     
     # Check if container is running
-    $running = docker-compose ps kali-recorder | Select-String "Up"
+    $running = & $script:DOCKER_COMPOSE ps kali-recorder | Select-String "Up"
     if (-not $running) {
         Write-Error-Custom "Kali container is not running. Start it first with option 1."
         return
     }
     
-    docker-compose exec kali-recorder zsh
+    & $script:DOCKER_COMPOSE exec kali-recorder zsh
 }
 
 function Web-UI {
@@ -147,7 +159,7 @@ function Web-UI {
     Set-Location $projectRoot
     
     # Check if container is running
-    $running = docker-compose ps guild-scroll-app | Select-String "Up"
+    $running = & $script:DOCKER_COMPOSE ps guild-scroll-app | Select-String "Up"
     if (-not $running) {
         Write-Error-Custom "Guild Scroll app is not running. Start it first with option 1."
         return
@@ -167,7 +179,7 @@ function View-Logs {
     Write-Info "Showing container logs (Ctrl+C to exit)..."
     Write-Host ""
     Set-Location $projectRoot
-    docker-compose logs -f
+    & $script:DOCKER_COMPOSE logs -f
 }
 
 function Rebuild-Images {
@@ -175,7 +187,7 @@ function Rebuild-Images {
     Set-Location $projectRoot
     
     Try {
-        docker-compose build --no-cache
+        & $script:DOCKER_COMPOSE build --no-cache
         Write-Success "Images rebuilt successfully"
     } Catch {
         Write-Error-Custom "Failed to rebuild images"
@@ -190,7 +202,7 @@ function Cleanup {
     if ($confirm -eq "yes") {
         Write-Info "Cleaning up..."
         Set-Location $projectRoot
-        docker-compose down -v
+        & $script:DOCKER_COMPOSE down -v
         Write-Success "Cleanup complete"
     } else {
         Write-Info "Cleanup cancelled"

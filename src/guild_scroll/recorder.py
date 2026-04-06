@@ -2,6 +2,7 @@
 Builds and launches the `script` command that records raw terminal I/O.
 """
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -18,10 +19,14 @@ def build_script_command(
     Uses --log-io / --log-timing / --logging-format advanced when available
     (util-linux >= 2.35). Falls back to -f (flush) + -t for older versions.
     """
+    script_path = shutil.which("script")
+    if not script_path:
+        raise FileNotFoundError("script binary not found in PATH")
+
     # Check if advanced logging is supported
     try:
         result = subprocess.run(
-            ["script", "--help"], capture_output=True, text=True
+            [script_path, "--help"], capture_output=True, text=True
         )
         advanced = "--log-io" in result.stdout or "--log-io" in result.stderr
     except FileNotFoundError:
@@ -29,7 +34,7 @@ def build_script_command(
 
     if advanced:
         cmd = [
-            "script",
+            script_path,
             "--log-out", str(raw_io_path),
             "--log-timing", str(timing_path),
             "--logging-format", "advanced",
@@ -39,7 +44,7 @@ def build_script_command(
     else:
         # Fallback: script -f (flush) -q, timing via -t
         cmd = [
-            "script",
+            script_path,
             "-f",
             "-q",
             "-t", str(timing_path),

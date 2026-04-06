@@ -33,21 +33,19 @@ def _build_default_markdown(session: LoadedSession, start_dt: datetime, duration
     meta = session.meta
     lines: list[str] = []
     lines.append(f"# Session: {meta.session_name}")
+    meta_parts = [f"**Host:** {meta.hostname}"]
     if getattr(meta, "operator", None):
-        lines.append(
-            f"**Host:** {meta.hostname} | "
-            f"**Operator:** {meta.operator} | "
-            f"**Date:** {meta.start_time} | "
-            f"**Duration:** {duration} | "
-            f"**Commands:** {len(session.commands)}"
-        )
-    else:
-        lines.append(
-            f"**Host:** {meta.hostname} | "
-            f"**Date:** {meta.start_time} | "
-            f"**Duration:** {duration} | "
-            f"**Commands:** {len(session.commands)}"
-        )
+        meta_parts.append(f"**Operator:** {meta.operator}")
+    meta_parts += [
+        f"**Date:** {meta.start_time}",
+        f"**Duration:** {duration}",
+        f"**Commands:** {len(session.commands)}",
+    ]
+    if getattr(meta, "result", None):
+        meta_parts.append(f"**Result:** {meta.result}")
+    if getattr(meta, "finalized", False):
+        meta_parts.append("**Finalized:** yes")
+    lines.append(" | ".join(meta_parts))
     lines.append("")
 
     multipart = len(session.parts) > 1
@@ -61,7 +59,8 @@ def _build_default_markdown(session: LoadedSession, start_dt: datetime, duration
     for cmd in session.commands:
         rel = _relative(start_dt, cmd.timestamp_start)
         tag = tag_command(cmd.command) or "—"
-        command_cell = f"`{cmd.command.replace('|', '\\|')}`"
+        escaped_cmd = cmd.command.replace('|', r'\|')
+        command_cell = f"`{escaped_cmd}`"
         cwd = cmd.working_directory or "—"
         if multipart:
             lines.append(
@@ -152,6 +151,10 @@ def _build_writeup_markdown(session: LoadedSession, start_dt: datetime, duration
     lines.append(f"- Start: {meta.start_time}")
     lines.append(f"- Duration: {duration}")
     lines.append(f"- Commands Executed: {len(session.commands)}")
+    if getattr(meta, "result", None):
+        lines.append(f"- Result: {meta.result}")
+    if getattr(meta, "finalized", False):
+        lines.append("- Finalized: yes")
     lines.append("### Assessment Overview and Recommendations")
     lines.append("Primary findings and remediation priorities are listed in the sections below.")
     lines.append("")
@@ -199,7 +202,8 @@ def _build_writeup_markdown(session: LoadedSession, start_dt: datetime, duration
         for cmd in session.commands:
             rel = _relative(start_dt, cmd.timestamp_start)
             phase = tag_command(cmd.command) or "unknown"
-            lines.append(f"| {cmd.seq} | {rel} | `{cmd.command.replace('|', '\\|')}` | {cmd.exit_code} | {phase} |")
+            escaped_cmd = cmd.command.replace('|', r'\|')
+            lines.append(f"| {cmd.seq} | {rel} | `{escaped_cmd}` | {cmd.exit_code} | {phase} |")
     else:
         lines.append("No commands recorded.")
     lines.append("")

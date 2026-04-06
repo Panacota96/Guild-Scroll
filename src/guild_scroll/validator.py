@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from guild_scroll.config import PARTS_DIR_NAME, SESSION_LOG_NAME
+from guild_scroll.integrity import load_session_key, verify_event_hmac, should_sign
 
 
 @dataclass
@@ -44,8 +45,14 @@ def _parse_jsonl(log_path: Path, sess_dir: Path, report: ValidationReport) -> li
         report.errors.append(f"missing log file: {_relative_to_session(sess_dir, log_path)}")
         return []
 
+    from guild_scroll.crypto import read_plaintext
+    try:
+        content = read_plaintext(log_path)
+    except Exception:
+        content = log_path.read_text(encoding="utf-8")
+
     records: list[dict] = []
-    for line_number, line in enumerate(log_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(content.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
@@ -164,6 +171,40 @@ def validate_session(sess_dir: Path) -> ValidationReport:
     if meta is not None and not meta.get("end_time"):
         report.warnings.append("session_meta.end_time is missing")
 
+    # HMAC integrity check
+    hmac_key = load_session_key(sess_dir)
+    session_mode = meta.get("mode") if meta is not None else None
+    if hmac_key is not None:
+        for record in records:
+            if not should_sign(record):
+                continue
+            if not verify_event_hmac(hmac_key, record):
+                event_type = record.get("type", "unknown")
+                seq = record.get("seq", "?")
+                report.errors.append(
+                    f"HMAC mismatch for {event_type} event (seq={seq}): record may have been tampered with"
+                )
+            # Assessment mode: unsigned events are errors
+            if session_mode == "assessment" and record.get("event_hmac") is None:
+                event_type = record.get("type", "unknown")
+                seq = record.get("seq", "?")
+                report.errors.append(
+                    f"unsigned {event_type} event (seq={seq}): assessment mode requires HMAC on all events"
+                )
+    else:
+        signed_count = sum(
+            1 for r in records if should_sign(r) and r.get("event_hmac") is not None
+        )
+        if signed_count:
+            report.warnings.append(
+                f"{signed_count} event(s) carry event_hmac but session.key is missing — cannot verify integrity"
+            )
+        # Assessment mode without key is an error
+        if session_mode == "assessment":
+            report.errors.append(
+                "assessment mode session is missing session.key — integrity cannot be verified"
+            )
+
     referenced_paths: set[Path] = set()
     for record in records:
         record_type = record.get("type")
@@ -182,12 +223,48 @@ def validate_session(sess_dir: Path) -> ValidationReport:
                 f"unreferenced file on disk: {_relative_to_session(sess_dir, file_path)}"
             )
 
+    # Assessment mode: check file/directory permissions
+    if session_mode == "assessment":
+        _check_assessment_permissions(sess_dir, report)
+
     report.info.append(f"checked {len(set(log_paths))} log file(s)")
     report.info.append(f"parsed {len(records)} JSONL record(s)")
+    if session_mode:
+        report.info.append(f"session mode: {session_mode}")
     report.info.append(
         f"found {len(report.errors)} error(s) and {len(report.warnings)} warning(s)"
     )
     return report
+
+def _check_assessment_permissions(sess_dir: Path, report: ValidationReport) -> None:
+    """Check that assessment mode sessions have strict file/directory permissions."""
+    try:
+        dir_mode = sess_dir.stat().st_mode & 0o777
+        if dir_mode & 0o077:
+            report.warnings.append(
+                f"session directory has loose permissions ({oct(dir_mode)}); "
+                f"assessment mode recommends 0o700"
+            )
+    except OSError:
+        pass
+
+    key_path = sess_dir / "session.key"
+    if key_path.exists():
+        try:
+            key_mode = key_path.stat().st_mode & 0o777
+            if key_mode & 0o077:
+                report.errors.append(
+                    f"session.key has loose permissions ({oct(key_mode)}); "
+                    f"assessment mode requires 0o600"
+                )
+        except OSError:
+            pass
+
+    sig_path = sess_dir / "logs" / "session.sig"
+    if not sig_path.exists():
+        report.warnings.append(
+            "assessment mode session is not signed — run 'gscroll sign' to create a signature"
+        )
 
 
 def _parse_timestamp(value: str) -> datetime | None:
@@ -252,8 +329,10 @@ def repair_session(sess_dir: Path) -> ValidationReport:
         return report
 
     log_path = sess_dir / "logs" / SESSION_LOG_NAME
+    from guild_scroll.crypto import read_plaintext, is_encrypted, load_encryption_key, encrypt_data
+    content = read_plaintext(log_path)
     rewritten: list[str] = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
+    for line in content.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
@@ -269,6 +348,14 @@ def repair_session(sess_dir: Path) -> ValidationReport:
             )
         rewritten.append(json.dumps(record, ensure_ascii=False))
 
-    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    new_content = "\n".join(rewritten) + "\n"
+    if is_encrypted(log_path):
+        enc_key = load_encryption_key(sess_dir)
+        if enc_key is not None:
+            log_path.write_bytes(encrypt_data(enc_key, new_content.encode("utf-8")))
+        else:
+            log_path.write_text(new_content, encoding="utf-8")
+    else:
+        log_path.write_text(new_content, encoding="utf-8")
     report.repaired.extend(updated_fields)
     return report

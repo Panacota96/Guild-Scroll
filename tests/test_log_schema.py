@@ -39,6 +39,33 @@ class TestSessionMeta:
         m2 = SessionMeta.from_dict(m.to_dict())
         assert m2.operator == "david"
 
+    def test_result_and_finalized_defaults(self):
+        m = SessionMeta(session_name="x", session_id="y", start_time="t")
+        assert m.result is None
+        assert m.finalized is False
+
+    def test_result_roundtrip(self):
+        m = SessionMeta(
+            session_name="root-box",
+            session_id="abc",
+            start_time="2026-03-30T00:00:00Z",
+            hostname="kali",
+            result="rooted",
+            finalized=True,
+        )
+        d = m.to_dict()
+        assert d["result"] == "rooted"
+        assert d["finalized"] is True
+        m2 = SessionMeta.from_dict(d)
+        assert m2.result == "rooted"
+        assert m2.finalized is True
+
+    def test_finalized_defaults_false_on_roundtrip(self):
+        m = SessionMeta(session_name="x", session_id="y", start_time="t")
+        m2 = SessionMeta.from_dict(m.to_dict())
+        assert m2.finalized is False
+        assert m2.result is None
+
 
 class TestCommandEvent:
     def test_roundtrip(self):

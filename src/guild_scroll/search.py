@@ -17,10 +17,17 @@ class SearchFilter:
     exit_code: Optional[int] = None
     cwd: Optional[str] = None
     part: Optional[int] = None
+    output_contains: Optional[str] = None
 
 
 def search_commands(session: LoadedSession, filters: SearchFilter) -> list[CommandEvent]:
     """Return commands matching all provided filters."""
+    # Build output map lazily — only when the output_contains filter is active.
+    output_map: Optional[dict] = None
+    if filters.output_contains is not None:
+        from guild_scroll.exporters.output_extractor import build_command_output_map
+        output_map = build_command_output_map(session)
+
     results = []
     for cmd in session.commands:
         if filters.tool is not None:
@@ -40,6 +47,10 @@ def search_commands(session: LoadedSession, filters: SearchFilter) -> list[Comma
                 continue
         if filters.part is not None:
             if cmd.part != filters.part:
+                continue
+        if filters.output_contains is not None and output_map is not None:
+            output = output_map.get((cmd.part, cmd.seq), "")
+            if filters.output_contains.lower() not in output.lower():
                 continue
         results.append(cmd)
     return results

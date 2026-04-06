@@ -161,16 +161,16 @@ Guild Scroll uses a **two-container architecture**:
 #### Starting a Recording Session
 
 ```bash
-# 1. Access Kali shell (containers must be running)
-docker-compose exec kali-recorder zsh
+# 1. Start a Guild Scroll recording session (containers must be running)
+docker-compose exec kali-recorder gscroll start kali-session-20260403-143022
 
-# 2. A new session is automatically created with timestamp
+# 2. Guild Scroll opens a recording shell for that session
 # You'll see:
 #   📝 Session Name: kali-session-20260403-143022
 #   📁 Session Path: /work/guild_scroll/sessions/kali-session-20260403-143022
 #   🔴 [REC] Recording in progress
 
-# 3. Work normally; all commands are recorded
+# 3. Work normally inside that shell; all commands are recorded
 root@kali:/work# nmap -sV localhost
 root@kali:/work# exit
 ```
@@ -232,11 +232,11 @@ kubectl port-forward -n guild-scroll svc/guild-scroll-app 8080:8080
 
 **Kali Recorder Shell**:
 ```bash
-# Connect to the Kali StatefulSet pod
-kubectl exec -it -n guild-scroll statefulset/kali-recorder -- zsh
+# Start a recorded Guild Scroll session in the Kali StatefulSet pod
+kubectl exec -it -n guild-scroll statefulset/kali-recorder -- gscroll start k8s-session
 
-# Or directly:
-kubectl exec -it -n guild-scroll kali-recorder-0 -- zsh
+# Or target the pod directly:
+kubectl exec -it -n guild-scroll kali-recorder-0 -- gscroll start k8s-session
 ```
 
 ### Stop Deployment

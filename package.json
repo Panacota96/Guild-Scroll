@@ -1,0 +1,30 @@
+{
+  "name": "guild-scroll",
+  "version": "1.0.0",
+  "description": "Playwright end-to-end test tooling for Guild Scroll",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed --project=chromium"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Panacota96/Guild-Scroll.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Panacota96/Guild-Scroll/issues"
+  },
+  "homepage": "https://github.com/Panacota96/Guild-Scroll#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.5.2"
+  }
+}

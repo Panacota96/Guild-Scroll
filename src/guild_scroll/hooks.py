@@ -18,7 +18,8 @@ _gs_real_zshrc="${{GUILD_SCROLL_REAL_HOME:-$HOME}}/.zshrc"
 [ -f "$_gs_real_zshrc" ] && source "$_gs_real_zshrc"
 
 # [REC] prompt indicator
-PROMPT="%F{{red}}[REC]%f %F{{yellow}}{session_name}%f $PROMPT"
+_gs_rec_marker="${{GUILD_SCROLL_REC_MARKER:-[REC]}}"
+PROMPT="%F{{red}}${{_gs_rec_marker}}%f %F{{yellow}}{session_name}%f $PROMPT"
 
 # --- Guild Scroll state ---
 _gs_hook_file="{hook_events_path}"
@@ -83,7 +84,8 @@ _gs_real_bashrc="${{GUILD_SCROLL_REAL_HOME:-$HOME}}/.bashrc"
 [ -f "$_gs_real_bashrc" ] && source "$_gs_real_bashrc"
 
 # [REC] prompt indicator
-PS1="\\[\\033[31m\\][REC]\\[\\033[0m\\] \\[\\033[33m\\]{session_name}\\[\\033[0m\\] $PS1"
+_gs_rec_marker="${{GUILD_SCROLL_REC_MARKER:-[REC]}}"
+PS1="\\[\\033[31m\\]${{_gs_rec_marker}}\\[\\033[0m\\] \\[\\033[33m\\]{session_name}\\[\\033[0m\\] $PS1"
 
 # --- Guild Scroll state ---
 _gs_hook_file="{hook_events_path}"
