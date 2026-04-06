@@ -10,9 +10,13 @@ import re
 import shutil
 import socket
 import tempfile
+import time
+import cgi
+import ssl
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 from guild_scroll.config import (
@@ -28,7 +32,7 @@ from guild_scroll.exporters.output_extractor import build_command_output_map
 from guild_scroll.log_schema import NoteEvent, SessionMeta
 from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.search import SearchFilter, search_commands
-from guild_scroll.session import list_sessions, next_part_number, update_parts_count
+from guild_scroll.session import create_session_scaffold, delete_session, list_sessions, next_part_number, update_parts_count
 from guild_scroll.session_loader import LoadedSession, load_session
 from guild_scroll.utils import generate_session_id, iso_timestamp, sanitize_session_name
 from guild_scroll.validator import repair_session, validate_session
@@ -43,6 +47,17 @@ from guild_scroll.web.terminal import (
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+_HEARTBEAT_TTL_SECONDS = 30
+_session_heartbeats: dict[str, float] = {}
+_ALLOWED_UPLOAD_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+}
+_MAX_UPLOAD_SIZE = 8 * 1024 * 1024  # 8 MB
 
 
 def _write_jsonl_record(log_path: Path, record: dict[str, object]) -> None:
@@ -71,6 +86,35 @@ def _detect_operator() -> str | None:
         value = os.environ.get(key)
         if value and value.strip():
             return value.strip()
+    return None
+
+
+def _heartbeat_status(session_name: str) -> tuple[str, float | None]:
+    last = _session_heartbeats.get(session_name)
+    if last is None:
+        return "unknown", None
+    if time.time() - last > _HEARTBEAT_TTL_SECONDS:
+        return "expired", last
+    return "live", last
+
+
+def _detect_upload_type(filename: str, data: bytes) -> str | None:
+    ext = Path(filename).suffix.lower()
+    expected = _ALLOWED_UPLOAD_TYPES.get(ext)
+    if expected is None:
+        return None
+    if ext == ".png" and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return expected
+    if ext in {".jpg", ".jpeg"} and data.startswith(b"\xff\xd8\xff"):
+        return expected
+    if ext == ".gif" and data.startswith(b"GIF8"):
+        return expected
+    if ext == ".webp" and data.startswith(b"RIFF") and b"WEBP" in data[:16]:
+        return expected
+    if ext == ".svg":
+        head = data[:200].decode("utf-8", errors="ignore").lower()
+        if "<svg" in head:
+            return expected
     return None
 
 
@@ -274,49 +318,77 @@ def _format_command_count(value: object) -> int:  # noqa: ANN001
 
 
 def _render_index_page(sessions: list[dict]) -> str:
-    if not sessions:
+    has_sessions = bool(sessions)
+    card_items: list[str] = []
+    for session in sorted(sessions, key=_session_sort_key, reverse=True):
+        name = str(session.get("session_name") or "unknown")
+        start_time = _format_start_time(session.get("start_time"))
+        hostname = _format_hostname(session.get("hostname"))
+        command_count = _format_command_count(session.get("command_count"))
+        quoted_name = quote(name, safe="")
+        escaped_name = html.escape(name)
+        data_name = html.escape(sanitize_session_name(name).lower(), quote=True)
+        data_start = html.escape(str(session.get("start_time") or ""), quote=True)
+        data_host = html.escape(hostname, quote=True)
+        data_commands = html.escape(str(command_count), quote=True)
+        name_json = html.escape(json.dumps(name))
+        card_items.append(
+            f"""
+<article class="session-card" data-name="{data_name}" data-start="{data_start}" data-host="{data_host}" data-commands="{data_commands}">
+  <header class="session-head">
+    <h2>{escaped_name}</h2>
+    <span class="glyph">SIGIL</span>
+  </header>
+  <dl class="session-meta">
+    <div><dt>Started</dt><dd>{html.escape(start_time)}</dd></div>
+    <div><dt>Host</dt><dd>{html.escape(hostname)}</dd></div>
+    <div><dt>Commands</dt><dd>{command_count}</dd></div>
+  </dl>
+  <nav class="session-actions">
+    <a class="rune-link" href="/session/{quoted_name}">Open Session</a>
+    <a class="rune-link" href="/api/session/{quoted_name}/download?format=html">Download HTML</a>
+    <a class="rune-link" href="/api/session/{quoted_name}/download?format=md">Download Markdown</a>
+    <button type="button" class="rune-link danger" onclick="gsCloseSession({name_json})">Close</button>
+    <button type="button" class="rune-link danger" onclick="gsDeleteSession({name_json})">Delete</button>
+  </nav>
+</article>
+"""
+        )
+    if card_items:
+        cards = "\n".join(card_items)
+    else:
         cards = (
             '<article class="session-card empty-state">'
             '<h2>No sessions found</h2>'
             '<p>Start a run with gscroll start to forge your first chronicle.</p>'
-            '</article>'
+            '<button type="button" class="new-session-btn" id="new-session-btn" onclick="gsNewSession()">New Session</button>'
+            "</article>"
         )
-    else:
-        card_items = []
-        for session in sessions:
-            name = str(session.get("session_name") or "unknown")
-            start_time = _format_start_time(session.get("start_time"))
-            hostname = _format_hostname(session.get("hostname"))
-            command_count = _format_command_count(session.get("command_count"))
-            quoted_name = quote(name, safe="")
-            escaped_name = html.escape(name)
-            card_items.append(
-                """
-<article class="session-card">
-  <header class="session-head">
-    <h2>{session_name}</h2>
-    <span class="glyph">SIGIL</span>
-  </header>
-  <dl class="session-meta">
-    <div><dt>Started</dt><dd>{start_time}</dd></div>
-    <div><dt>Host</dt><dd>{hostname}</dd></div>
-    <div><dt>Commands</dt><dd>{command_count}</dd></div>
-  </dl>
-  <nav class="session-actions">
-    <a class="rune-link" href="/session/{session_path}">Open Session</a>
-    <a class="rune-link" href="/api/session/{session_path}/download?format=html">Download HTML</a>
-    <a class="rune-link" href="/api/session/{session_path}/download?format=md">Download Markdown</a>
-  </nav>
-</article>
-""".format(
-                    session_name=escaped_name,
-                    start_time=html.escape(start_time),
-                    hostname=html.escape(hostname),
-                    command_count=command_count,
-                    session_path=quoted_name,
-                )
-            )
-        cards = "\n".join(card_items)
+
+    toolbar = (
+        f"""
+    <section class="toolbar">
+      <div class="search-box">
+        <input id="gs-search" class="search-input" type="search" aria-label="Search sessions" placeholder="Search sessions" oninput="gsFilter()" />
+        <span class="kbd-hint">Press / to search</span>
+      </div>
+      <div class="sort-select">
+        <label class="sr-only" for="gs-sort">Sort sessions</label>
+        <select id="gs-sort" aria-label="Sort sessions" onchange="gsSort()">
+          <option value="date-desc">Newest first</option>
+          <option value="date-asc">Oldest first</option>
+          <option value="name-asc">Name A → Z</option>
+          <option value="name-desc">Name Z → A</option>
+          <option value="commands-desc">Most commands</option>
+        </select>
+      </div>
+      <div class="session-count" id="gs-count">{len(card_items)} sessions</div>
+      <button type="button" class="new-session-btn" id="new-session-btn" onclick="gsNewSession()">New Session</button>
+    </section>
+"""
+        if has_sessions
+        else ""
+    )
 
     template = """<!DOCTYPE html>
 <html lang="en">
@@ -376,6 +448,46 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 0.95rem;
 }
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.search-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.search-input {
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 199, 255, 0.4);
+  background: rgba(10, 18, 30, 0.8);
+  color: var(--text-main);
+}
+.sort-select select {
+  padding: 0.42rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(63, 199, 255, 0.4);
+  background: rgba(10, 18, 30, 0.8);
+  color: var(--text-main);
+}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.session-count { font-family: "Consolas", monospace; color: var(--text-muted); }
+.kbd-hint { font-size: 0.8rem; color: var(--text-muted); }
+.new-session-btn {
+  background: linear-gradient(120deg, #2ad0ff, #1b88ff);
+  color: #061020;
+  border: none;
+  border-radius: 10px;
+  padding: 0.5rem 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(42, 208, 255, 0.25);
+}
+.new-session-btn:hover { transform: translateY(-1px); }
 .session-card {
   border: 1px solid rgba(63, 199, 255, 0.42);
   background: linear-gradient(160deg, rgba(16, 33, 52, 0.92), rgba(12, 23, 37, 0.86));
@@ -447,11 +559,43 @@ body {
   font-size: 0.8rem;
   font-family: "Consolas", monospace;
 }
+.rune-link.danger { border-color: #ff9b7c; color: #ffd7c9; }
 .rune-link:hover {
   border-color: var(--hover-core);
   color: #ffffff;
   background: rgba(42, 208, 255, 0.15);
 }
+.no-match {
+  margin-top: 1rem;
+  color: var(--text-muted);
+  font-family: "Consolas", monospace;
+}
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.modal[hidden] { display: none; }
+.modal-content {
+  background: #0f1a2c;
+  border: 1px solid rgba(63, 199, 255, 0.4);
+  border-radius: 12px;
+  padding: 1rem;
+  width: min(460px, 100%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.modal-content h3 { margin-top: 0; margin-bottom: 0.5rem; }
+.modal-form { display: grid; gap: 0.65rem; }
+.modal-form label { display: grid; gap: 0.3rem; color: var(--text-muted); }
+.modal-form input { padding: 0.45rem; border-radius: 8px; border: 1px solid rgba(63, 199, 255, 0.35); background: #0b1423; color: var(--text-main); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.pill-btn { border: 1px solid rgba(63, 199, 255, 0.5); background: #112035; color: #e9efff; border-radius: 999px; padding: 0.45rem 0.8rem; cursor: pointer; }
+.pill-btn.primary { background: #2ad0ff; color: #061020; border-color: #2ad0ff; }
+.form-error { color: #ffb3a3; min-height: 1.1rem; }
 .empty-state {
   text-align: center;
 }
@@ -480,14 +624,278 @@ body {
     <h1>Guild Scroll Session Codex</h1>
     <p>Neon runes mark each expedition. Select a chronicle to inspect reports or extract artifacts.</p>
   </section>
-  <section class="grid">
+  __TOOLBAR__
+  <section class="grid" id="gs-grid">
     __CARDS__
   </section>
+  <p id="gs-no-match" class="no-match" hidden>No sessions match your search</p>
 </main>
+<section class="modal" id="gs-modal" hidden>
+  <div class="modal-content">
+    <h3>New Session</h3>
+    <form id="gs-new-form" class="modal-form" onsubmit="gsSubmitNewSession(event)">
+      <label>Session Name
+        <input id="gs-session-name" name="name" required placeholder="ctf-run" autocomplete="off" />
+      </label>
+      <label>Operator
+        <input id="gs-operator" name="operator" placeholder="alice" autocomplete="off" />
+      </label>
+      <label>Target
+        <input id="gs-target" name="target" placeholder="10.10.11.1" autocomplete="off" />
+      </label>
+      <label>Platform
+        <input id="gs-platform" name="platform" placeholder="htb / thm" autocomplete="off" />
+      </label>
+      <p id="gs-new-error" class="form-error" aria-live="polite"></p>
+      <div class="modal-actions">
+        <button type="button" class="pill-btn" onclick="gsCloseNewSession()">Cancel</button>
+        <button type="submit" class="pill-btn primary">Create</button>
+      </div>
+    </form>
+  </div>
+</section>
+<script>
+function gsSessionCards() {
+  return Array.from(document.querySelectorAll(".session-card")).filter(card => !card.classList.contains("empty-state"));
+}
+
+function gsUpdateCount() {
+  const cards = gsSessionCards().filter(card => card.style.display !== "none");
+  const total = gsSessionCards().length;
+  const countEl = document.getElementById("gs-count");
+  const noMatch = document.getElementById("gs-no-match");
+  if (countEl) {
+    countEl.textContent = `${cards.length} session${cards.length === 1 ? "" : "s"}`;
+  }
+  if (noMatch) {
+    if (cards.length === 0 && total > 0) {
+      noMatch.hidden = false;
+    } else {
+      noMatch.hidden = true;
+    }
+  }
+}
+
+function gsFilter() {
+  const queryEl = document.getElementById("gs-search");
+  const query = queryEl ? queryEl.value.toLowerCase().trim() : "";
+  const cards = gsSessionCards();
+  cards.forEach(card => {
+    const name = (card.dataset.name || "").toLowerCase();
+    const host = (card.dataset.host || "").toLowerCase();
+    const match = !query || name.includes(query) || host.includes(query);
+    card.style.display = match ? "" : "none";
+  });
+  gsUpdateCount();
+}
+
+function gsSort() {
+  const select = document.getElementById("gs-sort");
+  if (!select) { return; }
+  const value = select.value;
+  const grid = document.getElementById("gs-grid");
+  if (!grid) { return; }
+  const cards = gsSessionCards();
+  const compare = (a, b) => {
+    const nameA = (a.dataset.name || "").toLowerCase();
+    const nameB = (b.dataset.name || "").toLowerCase();
+    const startA = a.dataset.start || "";
+    const startB = b.dataset.start || "";
+    const commandsA = Number(a.dataset.commands || 0);
+    const commandsB = Number(b.dataset.commands || 0);
+    switch (value) {
+      case "date-asc": return startA.localeCompare(startB);
+      case "name-asc": return nameA.localeCompare(nameB);
+      case "name-desc": return nameB.localeCompare(nameA);
+      case "commands-desc": return commandsB - commandsA;
+      default: return startB.localeCompare(startA);
+    }
+  };
+  cards.sort(compare).forEach(card => grid.appendChild(card));
+}
+
+function gsNewSession() {
+  const modal = document.getElementById("gs-modal");
+  if (!modal) return;
+  modal.hidden = false;
+  const input = document.getElementById("gs-session-name");
+  if (input) { input.focus(); }
+}
+
+function gsCloseNewSession() {
+  const modal = document.getElementById("gs-modal");
+  if (modal) { modal.hidden = true; }
+  const errorEl = document.getElementById("gs-new-error");
+  if (errorEl) { errorEl.textContent = ""; }
+  const form = document.getElementById("gs-new-form");
+  if (form) { form.reset(); }
+}
+
+function gsMakeActionButtons(name) {
+  const container = document.createElement("nav");
+  container.className = "session-actions";
+  const open = document.createElement("a");
+  open.className = "rune-link";
+  open.href = `/session/${encodeURIComponent(name)}`;
+  open.textContent = "Open Session";
+  container.appendChild(open);
+  const htmlBtn = document.createElement("a");
+  htmlBtn.className = "rune-link";
+  htmlBtn.href = `/api/session/${encodeURIComponent(name)}/download?format=html`;
+  htmlBtn.textContent = "Download HTML";
+  container.appendChild(htmlBtn);
+  const mdBtn = document.createElement("a");
+  mdBtn.className = "rune-link";
+  mdBtn.href = `/api/session/${encodeURIComponent(name)}/download?format=md`;
+  mdBtn.textContent = "Download Markdown";
+  container.appendChild(mdBtn);
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "rune-link danger";
+  closeBtn.textContent = "Close";
+  closeBtn.onclick = () => gsCloseSession(name);
+  container.appendChild(closeBtn);
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "rune-link danger";
+  delBtn.textContent = "Delete";
+  delBtn.onclick = () => gsDeleteSession(name);
+  container.appendChild(delBtn);
+  return container;
+}
+
+function gsAddCard(meta) {
+  if (!meta || !meta.session_name) return;
+  const grid = document.getElementById("gs-grid");
+  if (!grid) return;
+  const name = meta.session_name;
+  const start = meta.start_time || "";
+  const hostname = meta.hostname || "Unknown host";
+  const commands = meta.command_count || 0;
+  const card = document.createElement("article");
+  card.className = "session-card";
+  card.dataset.name = (meta.session_name || "").toLowerCase();
+  card.dataset.start = start;
+  card.dataset.host = hostname;
+  card.dataset.commands = String(commands);
+
+  const header = document.createElement("header");
+  header.className = "session-head";
+  const h2 = document.createElement("h2");
+  h2.textContent = name;
+  header.appendChild(h2);
+  const glyph = document.createElement("span");
+  glyph.className = "glyph";
+  glyph.textContent = "SIGIL";
+  header.appendChild(glyph);
+  card.appendChild(header);
+
+  const dl = document.createElement("dl");
+  dl.className = "session-meta";
+  const addRow = (dtText, ddText) => {
+    const wrapper = document.createElement("div");
+    const dt = document.createElement("dt");
+    dt.textContent = dtText;
+    const dd = document.createElement("dd");
+    dd.textContent = ddText;
+    wrapper.appendChild(dt);
+    wrapper.appendChild(dd);
+    dl.appendChild(wrapper);
+  };
+  addRow("Started", start.replace("T", " ").replace("Z", " UTC"));
+  addRow("Host", hostname);
+  addRow("Commands", commands);
+  card.appendChild(dl);
+  card.appendChild(gsMakeActionButtons(name));
+
+  const empty = grid.querySelector(".empty-state");
+  if (empty) { empty.remove(); }
+  grid.appendChild(card);
+  gsSort();
+  gsFilter();
+}
+
+async function gsSubmitNewSession(event) {
+  if (event) { event.preventDefault(); }
+  const form = document.getElementById("gs-new-form");
+  if (!form) return;
+  const name = document.getElementById("gs-session-name")?.value || "";
+  const operator = document.getElementById("gs-operator")?.value || "";
+  const target = document.getElementById("gs-target")?.value || "";
+  const platform = document.getElementById("gs-platform")?.value || "";
+  const errorEl = document.getElementById("gs-new-error");
+  if (!name.trim()) {
+    if (errorEl) { errorEl.textContent = "Session name is required."; }
+    return;
+  }
+  try {
+    const resp = await fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, operator, target, platform }),
+    });
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (errorEl) { errorEl.textContent = payload.error || "Unable to create session."; }
+      return;
+    }
+    gsAddCard(payload.session || payload.session_meta || payload);
+    gsCloseNewSession();
+  } catch (err) {
+    if (errorEl) { errorEl.textContent = "Failed to reach server."; }
+  }
+}
+
+function sanitizeName(name) {
+  return (name || "").toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function gsRemoveCard(name) {
+  const grid = document.getElementById("gs-grid");
+  if (!grid) return;
+  const cards = gsSessionCards().filter(card => (card.dataset.name || "") === sanitizeName(name));
+  cards.forEach(card => card.remove());
+  if (gsSessionCards().length === 0) {
+    grid.insertAdjacentHTML("beforeend", '<article class="session-card empty-state"><h2>No sessions found</h2><p>Start a run with gscroll start to forge your first chronicle.</p></article>');
+  }
+  gsUpdateCount();
+}
+
+async function gsDeleteSession(name) {
+  const encoded = encodeURIComponent(name);
+  const resp = await fetch(`/api/session/${encoded}`, { method: "DELETE" });
+  if (resp.status === 200 || resp.status === 204) {
+    gsRemoveCard(name);
+  }
+}
+
+async function gsCloseSession(name) {
+  const encoded = encodeURIComponent(name);
+  const resp = await fetch(`/api/session/${encoded}/close`, { method: "POST" });
+  if (resp.status === 200) {
+    gsRemoveCard(name);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  gsUpdateCount();
+  const search = document.getElementById("gs-search");
+  if (search) {
+    document.addEventListener("keydown", (event) => {
+      const target = event.target;
+      const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+      if (event.key === "/" && !isInput) {
+        event.preventDefault();
+        search.focus();
+      }
+    });
+  }
+});
+</script>
 </body>
 </html>
 """
-    return template.replace("__CARDS__", cards, 1)
+    return template.replace("__TOOLBAR__", toolbar, 1).replace("__CARDS__", cards, 1)
 
 
 def _render_session_page(
@@ -563,6 +971,7 @@ def _render_session_page(
                 )
 
         default_part = max(session.parts) if session.parts else 1
+        session_name_js = html.escape(json.dumps(session.meta.session_name))
 
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -583,6 +992,13 @@ a {{ color: #8cc8ff; }}
 .action-pill:hover {{ border-color: #52d0ff; background: #1a2a42; }}
 button.action-pill {{ background: transparent; color: #e9efff; cursor: pointer; }}
 .action-status {{ color: #9eb8da; min-height: 1.2rem; display: inline-flex; align-items: center; }}
+.heartbeat-badge {{ display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.6rem; border-radius: 999px; border: 1px solid #3d608d; background: #0f1d31; }}
+.upload-zone {{ border: 1px dashed #3d608d; border-radius: 12px; padding: 0.9rem; margin-bottom: 1rem; background: rgba(15, 29, 49, 0.65); }}
+.upload-zone h2 {{ margin-top: 0; }}
+.upload-zone p {{ color: #9eb8da; }}
+.upload-controls {{ display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }}
+.upload-status {{ color: #d1efff; min-height: 1.2rem; }}
+.sr-only {{ position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }}
 .report-frame {{ width: 100%; height: 760px; border: 1px solid #334b70; background: #fff; border-radius: 8px; }}
 .report-preview {{ background: #0b1020; border: 1px solid #334b70; border-radius: 8px; padding: 1rem; overflow: auto; min-height: 760px; }}
 .discoveries-panel {{ position: sticky; top: 1rem; border: 1px solid #3d608d; border-radius: 12px; background: linear-gradient(160deg, #13243b, #0f1d31); padding: 0.9rem; box-shadow: inset 0 0 0 1px rgba(96, 142, 193, 0.16); }}
@@ -705,6 +1121,75 @@ function gsSendTerminalInput() {{
     inputEl.value = "";
 }}
 
+async function gsDeleteSession(name) {{
+    const resp = await fetch(`/api/session/${{encodeURIComponent(name)}}`, {{ method: "DELETE" }});
+    if (resp.status === 200 || resp.status === 204) {{
+        window.location.href = "/";
+    }}
+}}
+
+async function gsCloseSession(name) {{
+    const resp = await fetch(`/api/session/${{encodeURIComponent(name)}}/close`, {{ method: "POST" }});
+    if (resp.status === 200) {{
+        window.location.href = "/";
+    }}
+}}
+
+async function gsHeartbeat() {{
+    try {{
+        const resp = await fetch(`/api/session/${{gsSessionPath}}/heartbeat`);
+        const payload = await resp.json().catch(() => ({{}}));
+        const status = payload.status || "unknown";
+        const last = payload.last_beat || "";
+        gsUpdateHeartbeat(status, last);
+    }} catch (_) {{
+        gsUpdateHeartbeat("unknown", null);
+    }}
+}}
+
+function gsUpdateHeartbeat(status, lastBeat) {{
+    const badge = document.getElementById("gs-session-status");
+    if (!badge) {{ return; }}
+    const label = status === "live" ? "Live" : status === "expired" ? "Expired" : "Unknown";
+    const timeText = lastBeat ? ` — last beat ${{lastBeat}}` : "";
+    badge.textContent = `Status: ${{label}}${{timeText}}`;
+}}
+
+async function gsHandleFiles(event) {{
+    if (event) {{
+        event.preventDefault();
+    }}
+    const input = document.getElementById("gs-file-input");
+    const files = event?.dataTransfer?.files || input?.files;
+    if (!files || files.length === 0) {{
+        return;
+    }}
+    for (const file of files) {{
+        await gsUploadFile(file);
+    }}
+    if (input) {{ input.value = ""; }}
+}}
+
+async function gsUploadFile(file) {{
+    const statusEl = document.getElementById("gs-upload-status");
+    try {{
+        const form = new FormData();
+        form.append("file", file, file.name);
+        const resp = await fetch(`/api/session/${{gsSessionPath}}/upload`, {{
+            method: "POST",
+            body: form,
+        }});
+        const payload = await resp.json().catch(() => ({{}}));
+        if (!resp.ok) {{
+            if (statusEl) {{ statusEl.textContent = payload.error || "Upload failed."; }}
+            return;
+        }}
+        if (statusEl) {{ statusEl.textContent = `Uploaded ${{payload.filename || file.name}}`; }}
+    }} catch (_) {{
+        if (statusEl) {{ statusEl.textContent = "Upload failed."; }}
+    }}
+}}
+
 async function gsContinueSession() {{
     const statusEl = document.getElementById("gs-continue-status");
     const btn = document.getElementById("gs-continue-btn");
@@ -734,21 +1219,38 @@ async function gsContinueSession() {{
 }}
 
 gsSetTerminalPart(gsTerminalPart);
+gsHeartbeat();
+setInterval(gsHeartbeat, 15000);
 </script>
 </head>
 <body>
 <main class="page-shell">
     <section class="header-card">
         <h1>Session: {html.escape(session.meta.session_name)}</h1>
-        <p class="meta-line">Commands in report: {len(session.commands)} | Preview format: {html.escape(preview_format)}</p>
+        <p class="meta-line">
+            Commands in report: {len(session.commands)} | Preview format: {html.escape(preview_format)}
+            <span class="heartbeat-badge" id="gs-session-status">Status: unknown</span>
+        </p>
         <div class="actions">
             <a class="action-pill" href="/session/{session_name}?{html_query}">HTML preview</a>
             <a class="action-pill" href="/session/{session_name}?{md_query}">Markdown preview</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
+            <button type="button" class="action-pill" onclick="gsCloseSession({session_name_js})">Close Session</button>
+            <button type="button" class="action-pill" onclick="gsDeleteSession({session_name_js})">Delete Session</button>
             <button type="button" id="gs-continue-btn" class="action-pill" onclick="gsContinueSession()">Continue Session</button>
             <span id="gs-continue-status" class="action-status" aria-live="polite"></span>
         </div>
+    </section>
+
+    <section class="upload-zone" id="gs-upload-zone" ondrop="gsHandleFiles(event)" ondragover="event.preventDefault()">
+        <h2>Upload Evidence</h2>
+        <p>Drag and drop screenshots or click to select files.</p>
+        <div class="upload-controls">
+            <input type="file" id="gs-file-input" class="sr-only" multiple accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" onchange="gsHandleFiles(event)" />
+            <button type="button" class="gs-terminal-btn" onclick="document.getElementById('gs-file-input').click()">Choose Files</button>
+        </div>
+        <p id="gs-upload-status" class="upload-status" aria-live="polite"></p>
     </section>
 
     <section class="terminal-panel" aria-label="Live terminal">
@@ -810,6 +1312,16 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             session_name = parsed.path[len("/api/session/"):-len("/terminal/read")].strip("/")
             self._handle_terminal_read(session_name, params)
             return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/heartbeat"):
+            session_name = parsed.path[len("/api/session/"):-len("/heartbeat")].strip("/")
+            self._handle_heartbeat_get(session_name)
+            return
+        if parsed.path.startswith("/api/session/") and "/asset/" in parsed.path:
+            parts = parsed.path[len("/api/session/"):].split("/asset/", 1)
+            session_name = parts[0].strip("/")
+            asset_path = parts[1] if len(parts) > 1 else ""
+            self._handle_asset(session_name, asset_path)
+            return
         if parsed.path == "/":
             self._handle_index()
             return
@@ -857,6 +1369,18 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/session/") and parsed.path.endswith("/terminal/stop"):
             session_name = parsed.path[len("/api/session/"):-len("/terminal/stop")].strip("/")
             self._handle_terminal_stop(session_name, params)
+            return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/heartbeat"):
+            session_name = parsed.path[len("/api/session/"):-len("/heartbeat")].strip("/")
+            self._handle_heartbeat_post(session_name)
+            return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/close"):
+            session_name = parsed.path[len("/api/session/"):-len("/close")].strip("/")
+            self._handle_close_session(session_name)
+            return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/upload"):
+            session_name = parsed.path[len("/api/session/"):-len("/upload")].strip("/")
+            self._handle_upload(session_name)
             return
         if parsed.path == "/api/sessions":
             self._handle_create_session()
@@ -1164,48 +1688,91 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
 
     def _handle_create_session(self) -> None:
         body = self._read_json_body()
-        raw_name = (body or {}).get("name", "") if isinstance(body, dict) else ""
-        if not raw_name or not isinstance(raw_name, str):
-            self._send_json({"error": "Invalid session name: 'name' is required"}, status=422)
+        if not isinstance(body, dict):
+            self._send_json({"error": "Invalid request body"}, status=400)
             return
 
-        raw_name = raw_name.strip()
-        if not _is_safe_session_name(raw_name) and (
-            "/" in raw_name or "\\" in raw_name or ".." in raw_name
-        ):
-            self._send_json({"error": "Invalid session name: path traversal not allowed"}, status=422)
+        raw_name = str(body.get("name") or "").strip()
+        operator = str(body.get("operator") or "").strip() or None
+        target = str(body.get("target") or "").strip() or None
+        platform = str(body.get("platform") or "").strip() or None
+
+        try:
+            meta = create_session_scaffold(
+                raw_name,
+                operator=operator,
+                target=target,
+                platform=platform,
+            )
+        except FileExistsError:
+            safe = sanitize_session_name(raw_name) or raw_name
+            self._send_json({"error": f"Session already exists: {safe!r}"}, status=409)
+            return
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=422)
+            return
+        except Exception:
+            self._send_json({"error": "Failed to create session"}, status=500)
             return
 
-        session_name = sanitize_session_name(raw_name)
-        if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name"}, status=422)
-            return
+        payload = {
+            "session": meta.to_dict(),
+            "status": "active",
+            "url": f"/session/{quote(meta.session_name, safe='')}",
+        }
+        self._send_json(payload, status=201)
 
-        sess_dir = get_sessions_dir() / session_name
-        if sess_dir.exists():
-            self._send_json({"error": f"Session already exists: {session_name!r}"}, status=409)
-            return
-
-        logs_dir = sess_dir / "logs"
-        assets_dir = sess_dir / "assets"
-        screenshots_dir = sess_dir / "screenshots"
-        for directory in (logs_dir, assets_dir, screenshots_dir):
-            directory.mkdir(parents=True, exist_ok=True)
-
-        meta = SessionMeta(
-            session_name=session_name,
-            session_id=generate_session_id(),
-            start_time=iso_timestamp(),
-            hostname=socket.gethostname(),
-        )
-        _write_jsonl_record(logs_dir / SESSION_LOG_NAME, meta.to_dict())
-
-        self._send_json({"session_name": session_name, "created": True}, status=201)
-
-    def _handle_delete_session(self, raw_name: str) -> None:
+    def _handle_heartbeat_post(self, raw_name: str) -> None:
         session_name = unquote(raw_name)
         if not _is_safe_session_name(session_name):
-            self._send_json({"error": "Invalid session name"}, status=400)
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        _session_heartbeats[session_name] = time.time()
+        self._send_json(
+            {
+                "status": "ok",
+                "session": session_name,
+                "expires_in": int(_HEARTBEAT_TTL_SECONDS),
+            }
+        )
+
+    def _handle_heartbeat_get(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        status_label, last = _heartbeat_status(session_name)
+        last_beat_iso = None
+        if last is not None:
+            last_beat_iso = datetime.fromtimestamp(last, tz=timezone.utc).isoformat()
+        self._send_json(
+            {
+                "session": session_name,
+                "status": status_label,
+                "last_beat": last_beat_iso,
+            }
+        )
+
+    def _stop_active_terminal(self, session_name: str) -> bool:
+        try:
+            return TERMINALS.stop_all(session_name)
+        except TerminalNotFound:
+            return False
+
+    def _handle_close_session(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name."}, status=400)
             return
 
         sess_dir = get_sessions_dir() / session_name
@@ -1213,11 +1780,125 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Session not found"}, status=404)
             return
 
-        shutil.rmtree(str(sess_dir))
-        self.send_response(204)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.end_headers()
+        try:
+            terminal_stopped = self._stop_active_terminal(session_name)
+            delete_session(session_name)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+        except OSError as exc:
+            self._send_json({"error": str(exc)}, status=500)
+            return
+
+        heartbeat_cleared = _session_heartbeats.pop(session_name, None) is not None
+        self._send_json(
+            {
+                "closed": session_name,
+                "terminal_stopped": terminal_stopped,
+                "heartbeat_cleared": heartbeat_cleared,
+            }
+        )
+
+    def _handle_upload(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            self._send_json({"error": "multipart/form-data required"}, status=400)
+            return
+
+        env = {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": content_type,
+            "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+        }
+        form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env, keep_blank_values=True)
+        if "file" not in form:
+            self._send_json({"error": "file field is required"}, status=400)
+            return
+
+        upload = form["file"]
+        filename = getattr(upload, "filename", "") or ""
+        if not filename:
+            self._send_json({"error": "Filename is required"}, status=400)
+            return
+        data = upload.file.read(_MAX_UPLOAD_SIZE + 1)
+        if len(data) > _MAX_UPLOAD_SIZE:
+            self._send_json({"error": "File too large"}, status=413)
+            return
+
+        mime = _detect_upload_type(filename, data)
+        if not mime:
+            suffix = Path(filename).suffix or filename
+            self._send_json({"error": f"Unsupported file type: {suffix}"}, status=415)
+            return
+
+        uploads_dir = sess_dir / "assets" / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = Path(filename).name
+        dest_path = uploads_dir / safe_name
+        dest_path.write_bytes(data)
+        asset_url = f"/api/session/{quote(session_name, safe='')}/asset/{quote(safe_name, safe='')}"
+
+        self._send_json({"filename": safe_name, "url": asset_url, "content_type": mime})
+
+    def _handle_asset(self, raw_name: str, asset_path: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_text("Invalid session name", status=400)
+            return
+
+        asset_path = unquote(asset_path)
+        uploads_dir = get_sessions_dir() / session_name / "assets" / "uploads"
+        target = uploads_dir / asset_path
+        try:
+            resolved_uploads = uploads_dir.resolve()
+            resolved_target = target.resolve(strict=False)
+            resolved_target.relative_to(resolved_uploads)
+        except (OSError, ValueError):
+            self._send_text("Not found", status=404)
+            return
+
+        if not resolved_target.exists() or not resolved_target.is_file():
+            self._send_text("Not found", status=404)
+            return
+
+        mime = _ALLOWED_UPLOAD_TYPES.get(resolved_target.suffix.lower(), "application/octet-stream")
+        try:
+            payload = resolved_target.read_bytes()
+        except OSError:
+            self._send_text("Not found", status=404)
+            return
+        self._send_bytes(payload, content_type=mime)
+
+    def _handle_delete_session(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+
+        if not (get_sessions_dir() / session_name).exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        try:
+            delete_session(session_name)
+        except ValueError as exc:
+            self._send_json({"error": "Invalid session name."}, status=400)
+            return
+        except (PermissionError, OSError) as exc:
+            self._send_json({"error": str(exc)}, status=500)
+            return
+
+        self._send_json({"deleted": session_name}, status=200)
 
     def _handle_continue_session(self, raw_name: str) -> None:
         session_name = unquote(raw_name)
@@ -1465,7 +2146,12 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
 
-def create_server(host: str = "127.0.0.1", port: int = 1551) -> ThreadingHTTPServer:
+def create_server(
+    host: str = "127.0.0.1",
+    port: int = 1551,
+    tls_certfile: str | None = None,
+    tls_keyfile: str | None = None,
+) -> ThreadingHTTPServer:
     """Create a report server.
 
     Binds to ``host``.  For safety, non-localhost hosts are rejected unless the
@@ -1474,16 +2160,27 @@ def create_server(host: str = "127.0.0.1", port: int = 1551) -> ThreadingHTTPSer
     """
     import os
 
-    if host != "127.0.0.1" and os.environ.get("GUILD_SCROLL_ALLOW_REMOTE") not in {"1", "true", "yes"}:
-        raise ValueError(
-            "gscroll serve only supports 127.0.0.1 for safety. "
-            "Set GUILD_SCROLL_ALLOW_REMOTE=1 to allow remote binding (e.g. inside Docker)."
-        )
-    return ThreadingHTTPServer((host, port), GuildScrollRequestHandler)
+    allow_remote = os.environ.get("GUILD_SCROLL_ALLOW_REMOTE") in {"1", "true", "yes"}
+    if host != "127.0.0.1" and not allow_remote and not tls_certfile:
+        print(f"WARNING: binding to {host} without GUILD_SCROLL_ALLOW_REMOTE=1; ensure external network isolation.", flush=True)
+
+    server = ThreadingHTTPServer((host, port), GuildScrollRequestHandler)
+    if tls_certfile or tls_keyfile:
+        if not tls_certfile or not tls_keyfile:
+            raise ValueError("Both tls_certfile and tls_keyfile are required to enable TLS.")
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(certfile=tls_certfile, keyfile=tls_keyfile)
+        ctx.set_ciphers("ECDHE+AESGCM:!aNULL:!eNULL:!MD5:!RC4")
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        print("TLS enabled for gscroll serve", flush=True)
+    return server
 
 
 def run_server(host: str = "127.0.0.1", port: int = 1551) -> None:
-    server = create_server(host=host, port=port)
+    from guild_scroll.web import create_server as _create_server
+
+    server = _create_server(host=host, port=port)
     try:
         print(f"[gscroll] Serving reports on http://{host}:{server.server_address[1]}")
         server.serve_forever()

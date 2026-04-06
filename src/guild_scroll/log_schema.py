@@ -21,6 +21,7 @@ class SessionMeta:
     parts_count: int = 1
     platform: Optional[str] = None  # "htb" | "thm" | None
     operator: Optional[str] = None
+    target: Optional[str] = None
     result: Optional[str] = None  # "rooted" | "compromised" | "partial" | "failed" | "incomplete"
     finalized: bool = False
     mode: Optional[str] = None  # "ctf" | "assessment" | None (legacy)

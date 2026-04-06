@@ -3,6 +3,7 @@ Click CLI: gscroll start | list | status | note | export | replay | search | tui
            join | share | import | serve
 """
 import sys
+import errno
 import click
 
 from guild_scroll import __version__
@@ -461,6 +462,11 @@ def serve(host, port):
     except ValueError as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
+    except OSError as exc:
+        if getattr(exc, "errno", None) == errno.EADDRINUSE:
+            click.echo(f"Port {port} already in use", err=True)
+            sys.exit(1)
+        raise
 
 
 @cli.command(
