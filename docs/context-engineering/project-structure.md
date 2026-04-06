@@ -36,7 +36,6 @@ Guild-Scroll/
 │   ├── platform_detect.py     # Detect HTB / THM CTF platform from network interfaces
 │   ├── updater.py             # Self-update: compare version, install via pip
 │   ├── utils.py               # Shared helpers: timestamps, UUID, name sanitization
-│   ├── web.py                 # Web-server launcher (TLS-capable)
 │   ├── exporters/
 │   │   ├── __init__.py
 │   │   ├── markdown.py        # Markdown report generator
@@ -189,7 +188,7 @@ output path.
 
 ### User Interface Layer
 
-- **`web.py` + `web/app.py`** — HTTP server and JSON API. Routes:
+- **`web/app.py`** — HTTP server and JSON API. Routes:
   `GET /api/sessions` (list), `GET /api/session/<name>` (load),
   `GET /api/search` (filter), `POST /api/note` (add annotation). Supports
   optional TLS 1.2+ via `--tls-cert` / `--tls-key`.
@@ -242,7 +241,7 @@ graph TD
     CLI --> Validator["validator.py\nintegrity check"]
     CLI --> Merge["merge.py\nmulti-part join"]
     CLI --> Sharing["sharing.py\narchive pack/unpack"]
-    CLI --> Web["web.py + web/app.py\nHTTP + JSON API"]
+    CLI --> Web["web/app.py\nHTTP + JSON API"]
     CLI --> TUI["tui/\nTextual dashboard"]
     CLI --> Replay["replay.py\nscriptreplay"]
     CLI --> Updater["updater.py\nself-update"]
