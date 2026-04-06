@@ -1,6 +1,7 @@
 """Tests for localhost report server."""
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import random
@@ -72,6 +73,14 @@ def _request_with_headers(server, method, path, body=None):
     response_headers = dict(res.getheaders())
     conn.close()
     return res.status, data, response_headers
+
+
+def test_create_server_signature():
+    sig = inspect.signature(create_server)
+    params = sig.parameters
+    assert list(params) == ["host", "port"]
+    assert params["host"].default == "127.0.0.1"
+    assert params["port"].default == 1551
 
 
 class TestServerRoutes:
