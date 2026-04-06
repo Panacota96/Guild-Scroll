@@ -1,7 +1,10 @@
+import base64
 import errno
 import json
+import os
 import random
 import re
+import socket
 import ssl
 import string
 import sys
@@ -128,6 +131,71 @@ def _multipart_body(filename: str, data: bytes, field: str = "file") -> tuple[by
         f"\r\n"
     ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
     return body, f"multipart/form-data; boundary={boundary}"
+
+
+def _ws_connect(server, path: str) -> socket.socket:
+    host = "127.0.0.1"
+    port = server.server_port
+    sock = socket.create_connection((host, port))
+    key = base64.b64encode(os.urandom(16)).decode()
+    headers = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n"
+    )
+    sock.sendall(headers.encode())
+    response = sock.recv(1024)
+    assert b"101" in response
+    return sock
+
+
+def _ws_send_text(sock: socket.socket, message: str) -> None:
+    data = message.encode("utf-8")
+    length = len(data)
+    frame = bytearray()
+    frame.append(0x81)  # FIN + text frame
+    mask_key = os.urandom(4)
+    if length < 126:
+        frame.append(0x80 | length)
+    elif length < (1 << 16):
+        frame.append(0x80 | 126)
+        frame.extend(length.to_bytes(2, "big"))
+    else:
+        frame.append(0x80 | 127)
+        frame.extend(length.to_bytes(8, "big"))
+    masked = bytes(b ^ mask_key[i % 4] for i, b in enumerate(data))
+    frame.extend(mask_key)
+    frame.extend(masked)
+    sock.sendall(frame)
+
+
+def _ws_recv_text(sock: socket.socket, timeout: float = 1.5) -> str:
+    sock.settimeout(timeout)
+    header = sock.recv(2)
+    if not header or len(header) < 2:
+        raise socket.timeout()
+    b1, b2 = header
+    opcode = b1 & 0x0F
+    if opcode == 0x8:  # close
+        return ""
+    length = b2 & 0x7F
+    if length == 126:
+        length = int.from_bytes(sock.recv(2), "big")
+    elif length == 127:
+        length = int.from_bytes(sock.recv(8), "big")
+    payload = b""
+    remaining = length
+    while remaining > 0:
+        chunk = sock.recv(remaining)
+        if not chunk:
+            break
+        payload += chunk
+        remaining -= len(chunk)
+    return payload.decode("utf-8", errors="replace")
 
 
 class TestIsSafeSessionName:
@@ -1425,6 +1493,65 @@ class TestTerminal:
         # terminal.log should exist
         log_path = sessions_dir / "term-full" / "terminal.log"
         assert log_path.exists()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="pty not available on Windows")
+    def test_terminal_websocket_captures_input_as_command_event(self, isolated_sessions_dir):
+        session_name = "ws-capture"
+        sessions_dir = get_sessions_dir()
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        _make_session(sessions_dir, session_name)
+
+        with _running_server() as server:
+            start_status, _, start_resp = _request_post(
+                server, f"/api/session/{session_name}/terminal/start", b""
+            )
+            start_payload = json.loads(start_resp)
+            if start_status == 501:
+                pytest.skip("pty not available")
+            if start_status == 500 and "zsh not found" in start_payload.get("error", ""):
+                pytest.skip("zsh not available")
+            assert start_status == 200
+
+            ws_path = f"/ws/session/{quote(session_name)}/terminal"
+            sock = _ws_connect(server, ws_path)
+            try:
+                _ws_send_text(sock, "echo websocket-cmd\n")
+                output_seen = ""
+                for _ in range(20):
+                    try:
+                        output_seen += _ws_recv_text(sock, timeout=0.3)
+                    except socket.timeout:
+                        pass
+                    if "websocket-cmd" in output_seen:
+                        break
+                    time.sleep(0.1)
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
+            _request_post(server, f"/api/session/{session_name}/terminal/stop", b"")
+
+        log_path = sessions_dir / session_name / "logs" / SESSION_LOG_NAME
+        records = [
+            json.loads(line)
+            for line in log_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        commands = [
+            r for r in records if r.get("type") == "command" and r.get("command") == "echo websocket-cmd"
+        ]
+        assert commands
+        event = commands[-1]
+        assert event.get("part", 1) == 1
+        assert event.get("working_directory", "") != ""
+
+        with _running_server() as server:
+            status, _, body = _request(server, f"/api/session/{session_name}")
+        assert status == 200
+        api_payload = json.loads(body)
+        assert any(cmd.get("command") == "echo websocket-cmd" for cmd in api_payload["commands"])
 
 
 # ── GET /api/sessions ─────────────────────────────────────────────────────────

@@ -372,6 +372,12 @@ Set `GUILD_SCROLL_ALLOW_REMOTE=1` to allow the report server to bind to non-loca
 | `GET` | `/api/session/{name}/download` | Download session export (`?format=md\|html`) |
 | `GET` | `/api/session/{name}/discoveries` | Fetch recent notes/assets timeline |
 
+### Live Web Terminal
+
+- Session pages include an **Open Terminal** panel that POSTs `/api/session/{name}/terminal/start` and streams over WebSocket `/ws/session/{name}/terminal`.
+- Each newline-delimited stdin message is logged to `session.jsonl` as a `CommandEvent` (with cwd, seq, and part) before being forwarded to the PTY; terminal output is mirrored to `terminal.log`.
+- REST fallbacks are available for polling and automation: `GET /api/session/{name}/terminal/read`, `POST /api/session/{name}/terminal/write`, and `POST /api/session/{name}/terminal/stop`.
+
 ### JSONL Event Types
 
 | Type | Key Fields |
