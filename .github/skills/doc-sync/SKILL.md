@@ -41,7 +41,7 @@ Use this table to locate where each change type must be documented:
 | Config constant or env var | `README.md` — Session Format section or Installation notes | `docs/context-engineering/runtime-requirements.md` |
 | Docker / Compose change | `DOCKER.md` | `docs/docker/` (create a page for major additions) |
 | CI workflow change | `DOCKER.md` (if Docker CI) or new `docs/` page for automation topics | `.github/workflows/` inline comments |
-| K8s manifest | `DOCKER.md` — Kubernetes section | `docs/docker/deployment-modes.md` |
+| K8s manifest | `DOCKER.md` — Kubernetes section | `../../../docs/docker/deployment-modes.md` |
 | General design or architecture | `docs/context-engineering/` (new page if substantial) | `README.md` → Codebase Guide cross-reference |
 
 ---
@@ -116,7 +116,7 @@ File naming convention:
 ### Step 4 — Cross-link
 
 Every new doc page must be linked from at least one existing document. Add the link to:
-- The relevant section of `README.md` (e.g., "See [Deployment Modes](docs/docker/deployment-modes.md)")
+- The relevant section of `README.md` (e.g., "See [Deployment Modes](../../../docs/docker/deployment-modes.md)")
 - `DOCKER.md` if Docker/K8s related
 - A parent `docs/` page if it belongs to an existing topic tree
 

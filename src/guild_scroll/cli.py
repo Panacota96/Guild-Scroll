@@ -2,7 +2,6 @@
 Click CLI: gscroll start | list | status | note | export | replay | search | tui | update
            join | share | import | serve
 """
-import errno
 import sys
 import click
 
@@ -592,49 +591,6 @@ def import_session(archive_path):
         sys.exit(1)
 
     click.echo(f"[gscroll] Imported session '{name}'.")
-
-
-@cli.command(
-    epilog=(
-        "\b\n"
-        "Examples:\n"
-        "  gscroll serve\n"
-        "  gscroll serve --port 1661\n"
-        "\n"
-        "The web UI is intentionally localhost-only and does not provide auth.\n"
-    )
-)
-@click.option(
-    "--host", default="127.0.0.1", show_default=True, metavar="HOST",
-    help="Bind host. Only 127.0.0.1 is allowed.",
-)
-@click.option(
-    "--port", default=1551, show_default=True, type=int, metavar="PORT",
-    help="Bind port for the local web server.",
-)
-def serve(host, port):
-    """Serve a localhost-only session viewer and JSON API."""
-    from guild_scroll.web import create_server
-
-    try:
-        server = create_server(host=host, port=port)
-    except ValueError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
-    except OSError as exc:
-        if exc.errno == errno.EADDRINUSE:
-            click.echo(f"Error: Port {port} already in use.", err=True)
-            sys.exit(1)
-        click.echo(f"Error starting server: {exc}", err=True)
-        sys.exit(1)
-
-    click.echo(f"[gscroll] Serving on http://{host}:{server.server_port} (Ctrl-C to stop)")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        click.echo("[gscroll] Server stopped.")
-    finally:
-        server.server_close()
 
 
 @cli.command(

@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.5.0] — 2026-04-06
+
+### Added
+
+- **POST /api/sessions** — Create a new session directory scaffold via the web API (returns 201 on success, 409 on name conflict, 422 on invalid/unsafe name).
+- **DELETE /api/session/{name}** — Delete a session directory via the web API (returns 204 on success, 404 if not found, 400 on path traversal).
+- **POST /api/session/{name}/continue** — Scaffold a new numbered part for an existing session via the web API (returns 200 with part number, 404 if session not found).
+- **POST /api/session/{name}/validate** — Run session integrity validation via the web API, optionally repairing with `?repair=true` (returns `{valid, errors, warnings, repaired}`).
+- **`GUILD_SCROLL_ALLOW_REMOTE=1` env var** — Allows binding the report server to non-localhost addresses (e.g. `0.0.0.0` inside Docker). Localhost-only restriction remains the default.
+
+### Fixed
+
+- **Duplicate `serve()` command removed** — deleted the second duplicate `serve` handler in `cli.py` so only one canonical implementation remains.
+- **Server tests now target active implementation** — `tests/test_server.py` imports `create_server` from `guild_scroll.web.app` and uses the current signature.
+- **Legacy dead modules removed** — deleted superseded `src/guild_scroll/server.py` and `src/guild_scroll/web.py` to avoid conflicting APIs.
+- **Docs aligned with package layout** — README now references `src/guild_scroll/web/` and `web/app.py` instead of removed `web.py`.
+
+---
+
 ## [0.4.1] — 2026-04-02
 
 ### Added

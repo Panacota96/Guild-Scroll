@@ -35,6 +35,7 @@ pipx install "git+https://github.com/Panacota96/Guild-Scroll.git[tui]"
 | `GUILD_SCROLL_DIR` | Base directory for sessions and assets |
 | `GUILD_SCROLL_SESSION` | Active session name fallback for session-aware commands |
 | `GUILD_SCROLL_REAL_HOME` | Hook/home override used in shell integration flows |
+| `GUILD_SCROLL_ALLOW_REMOTE` | Allows non-localhost bind for `gscroll serve` (required for container host `0.0.0.0`) |
 
 ## Related docs
 

@@ -3,22 +3,37 @@ from __future__ import annotations
 import html
 import json
 import re
+import shutil
+import socket
 import tempfile
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
-from guild_scroll.config import get_sessions_dir
+from guild_scroll.config import (
+    get_sessions_dir,
+    SESSION_LOG_NAME,
+    HOOK_EVENTS_NAME,
+    PARTS_DIR_NAME,
+)
 from guild_scroll.exporters.html import export_html
 from guild_scroll.exporters.markdown import export_markdown
 from guild_scroll.exporters.output_extractor import build_command_output_map
+from guild_scroll.log_schema import NoteEvent, SessionMeta
 from guild_scroll.search import SearchFilter, search_commands
 from guild_scroll.session import list_sessions
 from guild_scroll.session_loader import LoadedSession, load_session
+from guild_scroll.utils import generate_session_id, iso_timestamp, sanitize_session_name
+from guild_scroll.validator import repair_session, validate_session
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _write_jsonl_record(log_path: Path, record: dict[str, object]) -> None:
+    serialized = json.dumps(record, ensure_ascii=False)
+    log_path.write_text(serialized + "\n", encoding="utf-8")
 
 
 def _is_safe_session_name(name: str) -> bool:
@@ -626,14 +641,38 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
 
         self._send_text("Not found", status=404)
 
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/session/"):
+            session_name = parsed.path[len("/api/session/"):].strip("/")
+            self._handle_delete_session(session_name)
+            return
+        self._send_text("Not found", status=404)
+
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+
+        if parsed.path == "/api/sessions":
+            self._handle_create_session()
+            return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/continue"):
+            session_name = parsed.path[len("/api/session/"):-len("/continue")].strip("/")
+            self._handle_continue_session(session_name)
+            return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/validate"):
+            session_name = parsed.path[len("/api/session/"):-len("/validate")].strip("/")
+            self._handle_validate_session(session_name, params)
+            return
+        if parsed.path.startswith("/api/session/") and parsed.path.endswith("/notes"):
+            session_name = parsed.path[len("/api/session/"):-len("/notes")].strip("/")
+            self._handle_add_note(session_name)
+            return
         if not (parsed.path.startswith("/api/session/") and parsed.path.endswith("/report")):
             self._send_text("Not found", status=404)
             return
 
         session_name = parsed.path[len("/api/session/"):-len("/report")].strip("/")
-        params = parse_qs(parsed.query)
         body = self._read_json_body()
         if isinstance(body, dict):
             for key in ("format", "tool", "phase", "exit_code", "cwd", "part"):
@@ -690,6 +729,152 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
                 "content": content,
             }
         )
+
+    def _handle_create_session(self) -> None:
+        body = self._read_json_body()
+        raw_name = (body or {}).get("name", "") if isinstance(body, dict) else ""
+        if not raw_name or not isinstance(raw_name, str):
+            self._send_json({"error": "Invalid session name: 'name' is required"}, status=422)
+            return
+
+        raw_name = raw_name.strip()
+        if not _is_safe_session_name(raw_name) and (
+            "/" in raw_name or "\\" in raw_name or ".." in raw_name
+        ):
+            self._send_json({"error": "Invalid session name: path traversal not allowed"}, status=422)
+            return
+
+        session_name = sanitize_session_name(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=422)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if sess_dir.exists():
+            self._send_json({"error": f"Session already exists: {session_name!r}"}, status=409)
+            return
+
+        logs_dir = sess_dir / "logs"
+        assets_dir = sess_dir / "assets"
+        screenshots_dir = sess_dir / "screenshots"
+        for directory in (logs_dir, assets_dir, screenshots_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+
+        meta = SessionMeta(
+            session_name=session_name,
+            session_id=generate_session_id(),
+            start_time=iso_timestamp(),
+            hostname=socket.gethostname(),
+        )
+        _write_jsonl_record(logs_dir / SESSION_LOG_NAME, meta.to_dict())
+
+        self._send_json({"session_name": session_name, "created": True}, status=201)
+
+    def _handle_delete_session(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        shutil.rmtree(str(sess_dir))
+        self.send_response(204)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.end_headers()
+
+    def _handle_continue_session(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        parts_dir = sess_dir / PARTS_DIR_NAME
+        parts_dir.mkdir(exist_ok=True)
+        existing = [p for p in parts_dir.iterdir() if p.is_dir() and p.name.isdigit()]
+        next_part = max((int(p.name) for p in existing), default=1) + 1  # part 1 is logs/, so next is 2+
+
+        part_logs_dir = parts_dir / str(next_part) / "logs"
+        part_assets_dir = parts_dir / str(next_part) / "assets"
+        for directory in (part_logs_dir, part_assets_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+
+        part_meta = SessionMeta(
+            session_name=session_name,
+            session_id=generate_session_id(),
+            start_time=iso_timestamp(),
+            hostname=socket.gethostname(),
+        )
+        _write_jsonl_record(part_logs_dir / SESSION_LOG_NAME, part_meta.to_dict())
+
+        self._send_json({"session_name": session_name, "part": next_part}, status=200)
+
+    def _handle_validate_session(self, raw_name: str, params: dict[str, list[str]]) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        do_repair = _query_value(params, "repair") in {"true", "1", "yes"}
+        report = validate_session(sess_dir)
+        repaired: list[str] = []
+        if do_repair:
+            repair_report = repair_session(sess_dir)
+            repaired = list(repair_report.repaired)
+
+        self._send_json({
+            "valid": report.is_valid,
+            "errors": list(report.errors),
+            "warnings": list(report.warnings),
+            "repaired": repaired,
+        })
+
+    def _handle_add_note(self, raw_name: str) -> None:
+        session_name = unquote(raw_name)
+        if not _is_safe_session_name(session_name):
+            self._send_json({"error": "Invalid session name"}, status=400)
+            return
+
+        sess_dir = get_sessions_dir() / session_name
+        if not sess_dir.exists():
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        body = self._read_json_body()
+        if not isinstance(body, dict):
+            self._send_json({"error": "Invalid request body"}, status=400)
+            return
+
+        text = str(body.get("text", "")).strip()
+        if not text:
+            self._send_json({"error": "Note text is required"}, status=400)
+            return
+
+        raw_tags = body.get("tags", [])
+        tags: list[str] = []
+        if isinstance(raw_tags, list):
+            tags = [str(tag).strip() for tag in raw_tags if str(tag).strip()]
+
+        event = NoteEvent(text=text, timestamp=iso_timestamp(), tags=tags)
+        log_path = sess_dir / "logs" / SESSION_LOG_NAME
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
+
+        self._send_json({"ok": True}, status=201)
 
     def _handle_discoveries_api(self, raw_name: str, params: dict[str, list[str]]) -> None:
         try:
@@ -819,9 +1004,19 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
 
 
 def create_server(host: str = "127.0.0.1", port: int = 1551) -> ThreadingHTTPServer:
-    """Create a localhost-only report server."""
-    if host != "127.0.0.1":
-        raise ValueError("gscroll serve only supports 127.0.0.1 for safety.")
+    """Create a report server.
+
+    Binds to ``host``.  For safety, non-localhost hosts are rejected unless the
+    ``GUILD_SCROLL_ALLOW_REMOTE=1`` environment variable is set (intended for
+    Docker/container deployments where network isolation is provided externally).
+    """
+    import os
+
+    if host != "127.0.0.1" and os.environ.get("GUILD_SCROLL_ALLOW_REMOTE") not in {"1", "true", "yes"}:
+        raise ValueError(
+            "gscroll serve only supports 127.0.0.1 for safety. "
+            "Set GUILD_SCROLL_ALLOW_REMOTE=1 to allow remote binding (e.g. inside Docker)."
+        )
     return ThreadingHTTPServer((host, port), GuildScrollRequestHandler)
 
 

@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
-![Version](https://img.shields.io/badge/version-0.4.1-green)
+![Version](https://img.shields.io/badge/version-0.5.0-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![CTF](https://img.shields.io/badge/use--case-CTF%20%7C%20Pentest-red)
@@ -46,7 +46,7 @@ gscroll export --format md   # structured report, ready to share
 | **Validation** | `gscroll validate [SESSION] --repair` checks JSONL/assets/parts and patches repairable metadata |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
-| **Web preview** | `gscroll serve` hosts a localhost-only HTML viewer and JSON API |
+| **Web preview** | `gscroll serve` hosts an HTML viewer + JSON API with full session CRUD (`POST /api/sessions`, `DELETE`, `continue`, `validate`) |
 | **Session auto-detect** | All sub-commands pick up `GUILD_SCROLL_SESSION` automatically |
 | **Self-update** | `gscroll update` checks GitHub and reinstalls |
 
@@ -314,7 +314,7 @@ gscroll update
 | `src/guild_scroll/` | Main package: CLI, session management, log schema, exporters, validation, replay, sharing, and web/TUI entrypoints |
 | `src/guild_scroll/exporters/` | Format-specific exporters for Markdown, HTML, asciicast, and Obsidian |
 | `src/guild_scroll/tui/` | Optional Textual dashboard components |
-| `src/guild_scroll/web.py` + `src/guild_scroll/web/` | Local preview server and related web helpers |
+| `src/guild_scroll/web/` | Local preview server package (`app.py`) and related web helpers |
 | `tests/` | Pytest suite covering CLI flows, schema compatibility, exporters, merge logic, hooks, and validation |
 | `docs/context-engineering/` | Project-specific design notes for tool/agent workflows |
 | `.github/instructions/` | Shared contributor rules for Python, CLI implementation, and release prep |
@@ -327,7 +327,7 @@ gscroll update
 - `log_schema.py` and `log_writer.py` define the JSONL event model used across recording, export, replay, and validation.
 - `asset_detector.py`, `tool_tagger.py`, `analysis.py`, and `search.py` enrich command history with security-specific metadata.
 - `exporters/` turns a loaded session into shareable outputs; `validator.py` and `merge.py` keep session data consistent across repairs and multi-terminal workflows.
-- `sharing.py`, `web.py`, `updater.py`, and `tui/` are feature layers built on top of the same loaded-session primitives.
+- `sharing.py`, `web/app.py`, `updater.py`, and `tui/` are feature layers built on top of the same loaded-session primitives.
 
 ### Data Model at a Glance
 
@@ -353,6 +353,24 @@ Sessions are stored under `./guild_scroll/sessions/<name>/` (CWD-local, like `.g
 ```
 
 Override the base path with `GUILD_SCROLL_DIR`.
+
+Set `GUILD_SCROLL_ALLOW_REMOTE=1` to allow the report server to bind to non-localhost addresses (required for Docker/container deployments that use `--host 0.0.0.0`). Localhost-only is the default.
+
+### Web API Endpoints
+
+`gscroll serve` exposes a JSON API under `/api/`. Key endpoints:
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/sessions` | List all sessions |
+| `GET` | `/api/session/{name}` | Fetch session detail (commands, notes, assets) |
+| `POST` | `/api/sessions` | Create a session scaffold (`{"name": "..."}`) → 201/409/422 |
+| `DELETE` | `/api/session/{name}` | Delete a session directory → 204/404/400 |
+| `POST` | `/api/session/{name}/continue` | Scaffold a new session part → `{"part": N}` |
+| `POST` | `/api/session/{name}/validate` | Validate (and optionally repair with `?repair=true`) → `{valid, errors, warnings, repaired}` |
+| `POST` | `/api/session/{name}/report` | Render a filtered export (body: `{"format": "md\|html", ...}`) |
+| `GET` | `/api/session/{name}/download` | Download session export (`?format=md\|html`) |
+| `GET` | `/api/session/{name}/discoveries` | Fetch recent notes/assets timeline |
 
 ### JSONL Event Types
 
