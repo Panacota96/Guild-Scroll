@@ -59,6 +59,21 @@ def _detect_operator() -> Optional[str]:
     return None
 
 
+def next_part_number(parts_dir: Path) -> int:
+    """Return the next part number based on existing part directories."""
+    existing_parts = [p for p in parts_dir.iterdir() if p.is_dir() and p.name.isdigit()] if parts_dir.exists() else []
+    return max((int(p.name) for p in existing_parts), default=1) + 1  # part 1 is logs/, so next is 2+
+
+
+def update_parts_count(sess_dir: Path, parts_count: int) -> None:
+    """Update the top-level session_meta.parts_count to at least parts_count."""
+    log_path = sess_dir / "logs" / SESSION_LOG_NAME
+    if not log_path.exists():
+        return
+    with JSONLWriter(log_path) as writer:
+        _patch_session_meta_file(writer._fh, parts_count=parts_count)
+
+
 def start_session(raw_name: str, join: bool = False, mode: Optional[str] = None) -> None:
     """Create the session directory tree, inject hooks, launch script, finalize.
 
@@ -148,8 +163,7 @@ def _start_part(session_name: str, sess_dir: Path) -> None:
     parts_dir.mkdir(exist_ok=True)
 
     # Determine next part number (existing logs/ counts as part 1)
-    existing_parts = [p for p in parts_dir.iterdir() if p.is_dir() and p.name.isdigit()] if parts_dir.exists() else []
-    next_part = len(existing_parts) + 2  # part 1 is logs/, so next is 2+
+    next_part = next_part_number(parts_dir)
 
     part_logs_dir = parts_dir / str(next_part) / "logs"
     part_assets_dir = parts_dir / str(next_part) / "assets"
@@ -170,11 +184,14 @@ def _start_part(session_name: str, sess_dir: Path) -> None:
         start_time=iso_timestamp(),
         hostname=socket.gethostname(),
         operator=_detect_operator(),
+        parts_count=next_part,
     )
     part_log = part_logs_dir / SESSION_LOG_NAME
     hmac_key = load_session_key(sess_dir)
     with JSONLWriter(part_log, hmac_key=hmac_key) as writer:
         writer.write(part_meta.to_dict())
+
+    update_parts_count(sess_dir, next_part)
 
     env_part = str(next_part)
     try:
@@ -366,10 +383,15 @@ def _patch_session_meta(log_path: Path, end_time: str, command_count: int) -> No
     if not log_path.exists():
         return
     with JSONLWriter(log_path) as writer:
-        _patch_session_meta_file(writer._fh, end_time, command_count)
+        _patch_session_meta_file(writer._fh, end_time=end_time, command_count=command_count)
 
 
-def _patch_session_meta_file(fh, end_time: str, command_count: int) -> None:
+def _patch_session_meta_file(
+    fh,
+    end_time: Optional[str] = None,
+    command_count: Optional[int] = None,
+    parts_count: Optional[int] = None,
+) -> None:
     """Patch session_meta in-place using an already-open a+ compatible handle."""
     fh.flush()
     fh.seek(0)
@@ -385,8 +407,12 @@ def _patch_session_meta_file(fh, end_time: str, command_count: int) -> None:
             updated.append(line)
             continue
         if record.get("type") == "session_meta":
-            record["end_time"] = end_time
-            record["command_count"] = command_count
+            if end_time is not None:
+                record["end_time"] = end_time
+            if command_count is not None:
+                record["command_count"] = command_count
+            if parts_count is not None:
+                record["parts_count"] = max(int(record.get("parts_count") or 1), int(parts_count))
         updated.append(json.dumps(record, ensure_ascii=False))
     fh.seek(0)
     fh.truncate()

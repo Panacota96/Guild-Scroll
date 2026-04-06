@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from guild_scroll.config import PARTS_DIR_NAME, SESSION_LOG_NAME, get_sessions_dir
+from guild_scroll.hooks import detect_shell
 from guild_scroll.integrity import load_session_key
 from guild_scroll.log_schema import CommandEvent
 from guild_scroll.log_writer import JSONLWriter
@@ -59,9 +60,16 @@ class TerminalProcess:
         except ImportError as exc:  # pragma: no cover - platform specific
             raise TerminalNotSupported("Terminal not supported on this platform") from exc
 
-        shell_path = shutil.which(shell)
+        shell_candidate = detect_shell() or shell
+        shell_path = shutil.which(shell_candidate)
         if not shell_path:
-            raise ShellNotFound(f"{shell} not found on this system")
+            for fallback in ("bash", "sh"):
+                shell_path = shutil.which(fallback)
+                if shell_path:
+                    shell_candidate = fallback
+                    break
+        if not shell_path:
+            raise ShellNotFound(f"{shell_candidate} not found on this system")
 
         self.session_name = session_name
         self.part = part
@@ -92,6 +100,7 @@ class TerminalProcess:
 
         env = os.environ.copy()
         env.setdefault("TERM", "xterm-256color")
+        env.setdefault("SHELL", shell_candidate)
         work_dir = tempfile.gettempdir()
         self._proc = subprocess.Popen(
             [shell_path],
@@ -268,6 +277,13 @@ class TerminalManager:
             process = TerminalProcess(session_name=session_name, part=part)
             self._sessions[key] = process
             return process
+
+    def any_active(self, session_name: str) -> bool:
+        with self._lock:
+            for (name, _), proc in self._sessions.items():
+                if name == session_name and proc.is_alive():
+                    return True
+        return False
 
     def get(self, session_name: str, part: int = 1) -> Optional[TerminalProcess]:
         with self._lock:

@@ -21,12 +21,14 @@ from guild_scroll.config import (
     HOOK_EVENTS_NAME,
     PARTS_DIR_NAME,
 )
+from guild_scroll.integrity import load_session_key
 from guild_scroll.exporters.html import export_html
 from guild_scroll.exporters.markdown import export_markdown
 from guild_scroll.exporters.output_extractor import build_command_output_map
 from guild_scroll.log_schema import NoteEvent, SessionMeta
+from guild_scroll.log_writer import JSONLWriter
 from guild_scroll.search import SearchFilter, search_commands
-from guild_scroll.session import list_sessions
+from guild_scroll.session import list_sessions, next_part_number, update_parts_count
 from guild_scroll.session_loader import LoadedSession, load_session
 from guild_scroll.utils import generate_session_id, iso_timestamp, sanitize_session_name
 from guild_scroll.validator import repair_session, validate_session
@@ -61,6 +63,15 @@ def _is_safe_session_name(name: str) -> bool:
     except (OSError, ValueError):
         return False
     return True
+
+
+def _detect_operator() -> str | None:
+    """Return operator identity from environment, if available."""
+    for key in ("USER", "LOGNAME", "USERNAME"):
+        value = os.environ.get(key)
+        if value and value.strip():
+            return value.strip()
+    return None
 
 
 def _query_value(params: dict[str, list[str]], key: str) -> str | None:
@@ -551,6 +562,8 @@ def _render_session_page(
                         "</pre>"
                 )
 
+        default_part = max(session.parts) if session.parts else 1
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -568,6 +581,8 @@ a {{ color: #8cc8ff; }}
 .actions {{ display: flex; gap: 0.6rem; flex-wrap: wrap; margin: 0.9rem 0 1rem; }}
 .action-pill {{ border: 1px solid #36567f; border-radius: 999px; padding: 0.3rem 0.75rem; text-decoration: none; }}
 .action-pill:hover {{ border-color: #52d0ff; background: #1a2a42; }}
+button.action-pill {{ background: transparent; color: #e9efff; cursor: pointer; }}
+.action-status {{ color: #9eb8da; min-height: 1.2rem; display: inline-flex; align-items: center; }}
 .report-frame {{ width: 100%; height: 760px; border: 1px solid #334b70; background: #fff; border-radius: 8px; }}
 .report-preview {{ background: #0b1020; border: 1px solid #334b70; border-radius: 8px; padding: 1rem; overflow: auto; min-height: 760px; }}
 .discoveries-panel {{ position: sticky; top: 1rem; border: 1px solid #3d608d; border-radius: 12px; background: linear-gradient(160deg, #13243b, #0f1d31); padding: 0.9rem; box-shadow: inset 0 0 0 1px rgba(96, 142, 193, 0.16); }}
@@ -588,7 +603,9 @@ a {{ color: #8cc8ff; }}
 .discovery-tags {{ margin-top: 0.25rem; color: #9eb8da; font-size: 0.78rem; word-break: break-word; }}
 .discovery-empty {{ margin: 0.8rem 0 0; color: #9eb8da; }}
 .terminal-panel {{ border: 1px solid #36567f; border-radius: 12px; background: linear-gradient(145deg, #101b2c, #0c1626); padding: 0.9rem; margin-bottom: 1rem; }}
-.terminal-header {{ display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }}
+.terminal-header {{ display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }}
+.terminal-controls {{ display: inline-flex; align-items: center; gap: 0.5rem; }}
+.terminal-part-label {{ border: 1px solid #3d608d; border-radius: 6px; padding: 0.25rem 0.5rem; color: #c7dcff; font-size: 0.85rem; }}
 .gs-terminal-btn {{ border: 1px solid #3d608d; background: #0e1a2c; color: #e9efff; padding: 0.4rem 0.8rem; border-radius: 8px; cursor: pointer; }}
 .gs-terminal-btn:hover {{ border-color: #52d0ff; background: #13243b; }}
 .terminal-output {{ background: #0b1020; border: 1px solid #334b70; border-radius: 8px; padding: 0.6rem; min-height: 220px; max-height: 320px; overflow: auto; white-space: pre-wrap; }}
@@ -601,7 +618,20 @@ a {{ color: #8cc8ff; }}
 </style>
 <script>
 const gsSessionPath = "{session_name}";
+let gsTerminalPart = {default_part};
 let gsTerminalSocket = null;
+
+function gsSetTerminalPart(part) {{
+    gsTerminalPart = part;
+    const badge = document.getElementById("gs-terminal-part");
+    if (badge) {{
+        badge.textContent = "Part " + part;
+    }}
+}}
+
+function gsPartQuery() {{
+    return `?part=${{encodeURIComponent(gsTerminalPart)}}`;
+}}
 
 function gsSetTerminalButton(running) {{
     const btn = document.getElementById("gs-terminal-btn");
@@ -618,7 +648,7 @@ function gsAppendTerminalOutput(text) {{
 
 async function gsStartTerminal() {{
     try {{
-        const resp = await fetch(`/api/session/${{gsSessionPath}}/terminal/start`, {{ method: "POST" }});
+        const resp = await fetch(`/api/session/${{gsSessionPath}}/terminal/start${{gsPartQuery()}}`, {{ method: "POST" }});
         const payload = await resp.json().catch(() => ({{}}));
         if (!resp.ok) {{
             const msg = payload.error ? payload.error : "Unable to start terminal.";
@@ -631,7 +661,7 @@ async function gsStartTerminal() {{
     }}
 
     const wsProto = window.location.protocol === "https:" ? "wss" : "ws";
-    const wsUrl = wsProto + "://" + window.location.host + "/ws/session/" + gsSessionPath + "/terminal";
+    const wsUrl = wsProto + "://" + window.location.host + "/ws/session/" + gsSessionPath + "/terminal" + gsPartQuery();
     gsTerminalSocket = new WebSocket(wsUrl);
     gsTerminalSocket.onmessage = (event) => gsAppendTerminalOutput(event.data || "");
     gsTerminalSocket.onclose = () => {{ gsTerminalSocket = null; gsSetTerminalButton(false); }};
@@ -641,7 +671,7 @@ async function gsStartTerminal() {{
 
 async function gsStopTerminal() {{
     try {{
-        await fetch(`/api/session/${{gsSessionPath}}/terminal/stop`, {{ method: "POST" }});
+        await fetch(`/api/session/${{gsSessionPath}}/terminal/stop${{gsPartQuery()}}`, {{ method: "POST" }});
     }} catch (_) {{}}
     if (gsTerminalSocket) {{
         gsTerminalSocket.close();
@@ -666,7 +696,7 @@ function gsSendTerminalInput() {{
     if (gsTerminalSocket && gsTerminalSocket.readyState === WebSocket.OPEN) {{
         gsTerminalSocket.send(payload);
     }} else {{
-        fetch(`/api/session/${{gsSessionPath}}/terminal/write`, {{
+        fetch(`/api/session/${{gsSessionPath}}/terminal/write${{gsPartQuery()}}`, {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
             body: JSON.stringify({{ input: payload }}),
@@ -674,6 +704,36 @@ function gsSendTerminalInput() {{
     }}
     inputEl.value = "";
 }}
+
+async function gsContinueSession() {{
+    const statusEl = document.getElementById("gs-continue-status");
+    const btn = document.getElementById("gs-continue-btn");
+    if (statusEl) {{ statusEl.textContent = "Continuing..."; }}
+    if (btn) {{ btn.disabled = true; }}
+    try {{
+        const resp = await fetch(`/api/session/${{gsSessionPath}}/continue`, {{ method: "POST" }});
+        const payload = await resp.json().catch(() => ({{}}));
+        if (!resp.ok) {{
+            const msg = payload.error ? payload.error : "Unable to continue session.";
+            if (statusEl) {{ statusEl.textContent = msg; }}
+            return;
+        }}
+        const part = Number(payload.part) || 1;
+        gsSetTerminalPart(part);
+        if (gsTerminalSocket) {{
+            await gsStopTerminal();
+        }}
+        if (statusEl) {{
+            statusEl.textContent = `Started part ${{part}}`;
+        }}
+    }} catch (err) {{
+        if (statusEl) {{ statusEl.textContent = "Failed to continue session."; }}
+    }} finally {{
+        if (btn) {{ btn.disabled = false; }}
+    }}
+}}
+
+gsSetTerminalPart(gsTerminalPart);
 </script>
 </head>
 <body>
@@ -686,13 +746,18 @@ function gsSendTerminalInput() {{
             <a class="action-pill" href="/session/{session_name}?{md_query}">Markdown preview</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'html', **filter_params})}">Download HTML</a>
             <a class="action-pill" href="/api/session/{session_name}/download?{urlencode({'format': 'md', **filter_params})}">Download Markdown</a>
+            <button type="button" id="gs-continue-btn" class="action-pill" onclick="gsContinueSession()">Continue Session</button>
+            <span id="gs-continue-status" class="action-status" aria-live="polite"></span>
         </div>
     </section>
 
     <section class="terminal-panel" aria-label="Live terminal">
         <div class="terminal-header">
             <h2>Live Terminal</h2>
-            <button type="button" id="gs-terminal-btn" class="gs-terminal-btn" onclick="gsTerminalToggle()">Open Terminal</button>
+            <div class="terminal-controls">
+                <span id="gs-terminal-part" class="terminal-part-label"></span>
+                <button type="button" id="gs-terminal-btn" class="gs-terminal-btn" onclick="gsTerminalToggle()">Open Terminal</button>
+            </div>
         </div>
         <pre id="gs-terminal-output" class="terminal-output" aria-live="polite"></pre>
         <div class="terminal-actions">
@@ -1165,13 +1230,17 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Session not found"}, status=404)
             return
 
+        if TERMINALS.any_active(session_name):
+            self._send_json({"error": "Session already active"}, status=409)
+            return
+
         parts_dir = sess_dir / PARTS_DIR_NAME
         parts_dir.mkdir(exist_ok=True)
-        existing = [p for p in parts_dir.iterdir() if p.is_dir() and p.name.isdigit()]
-        next_part = max((int(p.name) for p in existing), default=1) + 1  # part 1 is logs/, so next is 2+
+        next_part = next_part_number(parts_dir)
 
-        part_logs_dir = parts_dir / str(next_part) / "logs"
-        part_assets_dir = parts_dir / str(next_part) / "assets"
+        part_root = parts_dir / str(next_part)
+        part_logs_dir = part_root / "logs"
+        part_assets_dir = part_root / "assets"
         for directory in (part_logs_dir, part_assets_dir):
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -1180,10 +1249,36 @@ class GuildScrollRequestHandler(BaseHTTPRequestHandler):
             session_id=generate_session_id(),
             start_time=iso_timestamp(),
             hostname=socket.gethostname(),
+            operator=_detect_operator(),
+            parts_count=next_part,
         )
-        _write_jsonl_record(part_logs_dir / SESSION_LOG_NAME, part_meta.to_dict())
+        hmac_key = load_session_key(sess_dir)
+        writer = JSONLWriter(part_logs_dir / SESSION_LOG_NAME, hmac_key=hmac_key)
+        writer.write(part_meta.to_dict())
+        writer.close()
 
-        self._send_json({"session_name": session_name, "part": next_part}, status=200)
+        try:
+            proc = TERMINALS.start(session_name, part=next_part)
+        except TerminalAlreadyRunning:
+            shutil.rmtree(str(part_root), ignore_errors=True)
+            self._send_json({"error": "Session already active"}, status=409)
+            return
+        except TerminalNotSupported as exc:
+            shutil.rmtree(str(part_root), ignore_errors=True)
+            self._send_json({"error": str(exc)}, status=501)
+            return
+        except ShellNotFound as exc:
+            shutil.rmtree(str(part_root), ignore_errors=True)
+            self._send_json({"error": str(exc)}, status=500)
+            return
+        except FileNotFoundError:
+            shutil.rmtree(str(part_root), ignore_errors=True)
+            self._send_json({"error": "Session not found"}, status=404)
+            return
+
+        update_parts_count(sess_dir, next_part)
+
+        self._send_json({"session": session_name, "part": next_part, "status": "active", "pid": proc.pid}, status=200)
 
     def _handle_validate_session(self, raw_name: str, params: dict[str, list[str]]) -> None:
         session_name = unquote(raw_name)
