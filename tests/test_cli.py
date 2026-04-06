@@ -1,4 +1,5 @@
 """CLI tests using Click's test runner."""
+import ast
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -128,6 +129,15 @@ class TestUpdateCommand:
 
 
 class TestServeCommand:
+    def test_single_serve_definition(self):
+        cli_path = Path(__file__).resolve().parents[1] / "src" / "guild_scroll" / "cli.py"
+        source = cli_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        serve_defs = [
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "serve"
+        ]
+        assert len(serve_defs) == 1
+
     def test_serve_invokes_web_server(self, isolated_sessions_dir):
         runner = CliRunner()
         with patch("guild_scroll.web.app.run_server") as mock_run_server:
