@@ -49,7 +49,7 @@ graph LR
         cli["cli.py\nClick commands"]
         exporters["exporters/\nmd | html | cast | obsidian"]
         tui["tui/\nTextual dashboard"]
-        web["web.py + web/\nlocal viewer + API"]
+        web["web/app.py\nlocal viewer + API"]
         replay["replay.py\nscriptreplay wrapper"]
         sharing["sharing.py\narchive + uploads"]
         updater["updater.py\nself-update"]
@@ -90,7 +90,7 @@ graph TD
     src --> security_mod["validator.py / integrity.py\ncrypto.py / signer.py"]
     src --> exporters_mod["exporters/\nmd | html | cast | obsidian"]
     src --> tui_mod["tui/\nTextual dashboard"]
-    src --> web_mod["web/ + web.py\nLocal viewer & API"]
+    src --> web_mod["web/app.py\nLocal viewer & API"]
 
     docs --> ctx["context-engineering/\nDesign decisions"]
     docs --> docker_docs["docker/\nDeployment guides"]
