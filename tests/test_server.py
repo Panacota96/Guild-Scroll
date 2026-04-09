@@ -78,7 +78,7 @@ def _request_with_headers(server, method, path, body=None):
 def test_create_server_signature():
     sig = inspect.signature(create_server)
     params = sig.parameters
-    assert list(params) == ["host", "port"]
+    assert list(params) == ["host", "port", "tls_certfile", "tls_keyfile"]
     assert params["host"].default == "127.0.0.1"
     assert params["port"].default == 1551
 
@@ -244,7 +244,7 @@ class TestCRUDEndpoints:
             status, data = _request(server, "POST", "/api/sessions", body={"name": "new-session"})
             assert status == 201
             payload = json.loads(data)
-            assert payload["session_name"] == "new-session"
+            assert payload["session"]["session_name"] == "new-session"
             assert (sessions_dir / "new-session" / "logs" / "session.jsonl").exists()
         finally:
             server.shutdown()
@@ -294,7 +294,7 @@ class TestCRUDEndpoints:
         server, thread = _start_test_server()
         try:
             status, _ = _request(server, "DELETE", "/api/session/del-sess")
-            assert status == 204
+            assert status == 200
             assert not (sessions_dir / "del-sess").exists()
         finally:
             server.shutdown()

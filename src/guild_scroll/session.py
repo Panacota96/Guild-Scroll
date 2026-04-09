@@ -74,6 +74,64 @@ def update_parts_count(sess_dir: Path, parts_count: int) -> None:
         _patch_session_meta_file(writer._fh, parts_count=parts_count)
 
 
+def create_session_scaffold(
+    raw_name: str,
+    *,
+    operator: Optional[str] = None,
+    target: Optional[str] = None,
+    platform: Optional[str] = None,
+    mode: Optional[str] = None,
+) -> SessionMeta:
+    """Create a new session directory tree and initial session_meta record."""
+    if mode is None:
+        mode = get_default_mode()
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        raise ValueError("Invalid session name: 'name' is required")
+    if not any(ch.isalnum() for ch in raw_name):
+        raise ValueError("Invalid session name: must include letters or numbers")
+    if any(sep in raw_name for sep in ("/", "\\")) or ".." in raw_name:
+        raise ValueError("Invalid session name: path traversal not allowed")
+
+    name = sanitize_session_name(raw_name)
+    sess_dir = _session_dir(name)
+    try:
+        resolved_sessions_dir = get_sessions_dir().resolve()
+        resolved_candidate = sess_dir.resolve(strict=False)
+        resolved_candidate.relative_to(resolved_sessions_dir)
+    except (OSError, ValueError) as exc:
+        raise ValueError("Invalid session name") from exc
+
+    if sess_dir.exists():
+        raise FileExistsError(f"Session already exists: {name!r}")
+
+    logs_dir = sess_dir / "logs"
+    assets_dir = sess_dir / "assets"
+    screenshots_dir = sess_dir / "screenshots"
+    for directory in (logs_dir, assets_dir, screenshots_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    session_id = generate_session_id()
+    hmac_key = generate_session_key(sess_dir)
+    generate_encryption_key(sess_dir)
+    resolved_operator = (operator or "").strip() or _detect_operator()
+    resolved_target = (target or "").strip() or None
+    resolved_platform = (platform or "").strip() or _detect_platform_safe()
+
+    meta = SessionMeta(
+        session_name=name,
+        session_id=session_id,
+        start_time=iso_timestamp(),
+        hostname=socket.gethostname(),
+        operator=resolved_operator,
+        platform=resolved_platform,
+        target=resolved_target,
+        mode=mode,
+    )
+    with JSONLWriter(logs_dir / SESSION_LOG_NAME, hmac_key=hmac_key) as writer:
+        writer.write(meta.to_dict())
+    return meta
+
+
 def start_session(raw_name: str, join: bool = False, mode: Optional[str] = None) -> None:
     """Create the session directory tree, inject hooks, launch script, finalize.
 
@@ -287,6 +345,9 @@ def finalize_session(
                     pass
             elif etype == "asset_hint":
                 original_path = Path(evt.get("original_path", ""))
+                if original_path.is_absolute() or ".." in original_path.parts:
+                    logging.getLogger(__name__).warning("Rejected asset path outside session: %s", original_path)
+                    continue
                 if original_path.exists():
                     dest = _capture_asset_for_event(original_path, assets_dir)
                     if dest:

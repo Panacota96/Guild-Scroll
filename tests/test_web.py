@@ -1067,7 +1067,10 @@ class TestSessionCreate:
 
         payload = json.loads(resp)
         assert status == 201
-        assert payload["session"] == "web-created"
+        assert payload["session"]["session_name"] == "web-created"
+        assert payload["session"]["hostname"]
+        assert payload["session"]["start_time"]
+        assert payload["status"] == "active"
         assert "/session/web-created" in payload["url"]
         assert (sessions_dir / "web-created" / "logs" / SESSION_LOG_NAME).exists()
 
@@ -1081,7 +1084,21 @@ class TestSessionCreate:
 
         payload = json.loads(resp)
         assert status == 201
-        assert payload["session"] == "my-session"
+        assert payload["session"]["session_name"] == "my-session"
+        assert payload["session"]["start_time"]
+
+    def test_post_api_sessions_accepts_metadata(self, isolated_sessions_dir):
+        get_sessions_dir().mkdir(parents=True, exist_ok=True)
+
+        with _running_server() as server:
+            body = json.dumps({"name": "meta-run", "operator": "alice", "target": "10.0.0.1", "platform": "htb"}).encode()
+            status, _, resp = _request_post(server, "/api/sessions", body)
+
+        payload = json.loads(resp)
+        assert status == 201
+        assert payload["session"]["operator"] == "alice"
+        assert payload["session"]["target"] == "10.0.0.1"
+        assert payload["session"]["platform"] == "htb"
 
     def test_post_api_sessions_rejects_duplicate(self, isolated_sessions_dir):
         sessions_dir = get_sessions_dir()
@@ -1104,7 +1121,7 @@ class TestSessionCreate:
             status, _, resp = _request_post(server, "/api/sessions", body)
 
         payload = json.loads(resp)
-        assert status == 400
+        assert status == 422
         assert "name" in payload["error"].lower()
 
     def test_index_page_has_new_session_button(self, isolated_sessions_dir):

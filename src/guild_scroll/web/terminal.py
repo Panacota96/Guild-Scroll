@@ -302,6 +302,18 @@ class TerminalManager:
         with self._lock:
             self._sessions.pop(key, None)
 
+    def stop_all(self, session_name: str) -> bool:
+        stopped = False
+        with self._lock:
+            keys = [(name, part) for (name, part), proc in self._sessions.items() if name == session_name and proc.is_alive()]
+        for name, part in keys:
+            try:
+                self.stop(name, part=part)
+                stopped = True
+            except TerminalNotFound:
+                continue
+        return stopped
+
     def read(self, session_name: str, part: int = 1) -> Tuple[bool, str]:
         proc = self.get(session_name, part)
         if not proc:

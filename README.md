@@ -46,7 +46,7 @@ gscroll export --format md   # structured report, ready to share
 | **Validation** | `gscroll validate [SESSION] --repair` checks JSONL/assets/parts and patches repairable metadata |
 | **Replay** | `gscroll replay` via `scriptreplay` with speed control |
 | **TUI** | Interactive Textual dashboard — session sidebar, phase timeline, command table |
-| **Web preview** | `gscroll serve` hosts an HTML viewer + JSON API with session CRUD (create, delete, continue with part tracking, validate) |
+| **Web preview** | `gscroll serve` hosts an HTML viewer + JSON API with browser-based session create/close, uploads, heartbeats, and continue/validate |
 | **Session auto-detect** | All sub-commands pick up `GUILD_SCROLL_SESSION` automatically |
 | **Self-update** | `gscroll update` checks GitHub and reinstalls |
 
@@ -354,7 +354,7 @@ Sessions are stored under `./guild_scroll/sessions/<name>/` (CWD-local, like `.g
 
 Override the base path with `GUILD_SCROLL_DIR`.
 
-Set `GUILD_SCROLL_ALLOW_REMOTE=1` to allow the report server to bind to non-localhost addresses (required for Docker/container deployments that use `--host 0.0.0.0`). Localhost-only is the default.
+Non-localhost binds (`--host 0.0.0.0`) are allowed but print a safety warning; set `GUILD_SCROLL_ALLOW_REMOTE=1` (or enable TLS) to silence the warning in containerized deployments.
 
 ### Web API Endpoints
 
@@ -364,13 +364,17 @@ Set `GUILD_SCROLL_ALLOW_REMOTE=1` to allow the report server to bind to non-loca
 |---|---|---|
 | `GET` | `/api/sessions` | List all sessions |
 | `GET` | `/api/session/{name}` | Fetch session detail (commands, notes, assets) |
-| `POST` | `/api/sessions` | Create a session scaffold (`{"name": "..."}`) → 201/409/422 |
-| `DELETE` | `/api/session/{name}` | Delete a session directory → 204/404/400 |
+| `POST` | `/api/sessions` | Create a session scaffold (`{"name": "..." , "operator": "...", "target": "...", "platform": "htb|thm"}`) → `{"session": {session_meta...}}` (201/409/422) |
+| `DELETE` | `/api/session/{name}` | Delete a session directory → `{"deleted": name}` (200/404/400) |
 | `POST` | `/api/session/{name}/continue` | Start a joined session part → `{"session": "...", "part": N, "status": "active"}` (404 if missing, 409 if already active) |
 | `POST` | `/api/session/{name}/validate` | Validate (and optionally repair with `?repair=true`) → `{valid, errors, warnings, repaired}` |
 | `POST` | `/api/session/{name}/report` | Render a filtered export (body: `{"format": "md\|html", ...}`) |
 | `GET` | `/api/session/{name}/download` | Download session export (`?format=md\|html`) |
 | `GET` | `/api/session/{name}/discoveries` | Fetch recent notes/assets timeline |
+| `GET` / `POST` | `/api/session/{name}/heartbeat` | Track liveness of active sessions; GET returns `{"status": "live\|unknown", "last_beat": ...}` |
+| `POST` | `/api/session/{name}/close` | Stop live terminals, clear heartbeat, and delete the session directory |
+| `POST` | `/api/session/{name}/upload` | Upload screenshots/evidence (PNG/JPEG/WEBP/GIF/SVG) to `assets/uploads/` |
+| `GET` | `/api/session/{name}/asset/{filename}` | Serve uploaded assets (with content-type enforcement) |
 
 ### Live Web Terminal
 
@@ -383,7 +387,7 @@ Set `GUILD_SCROLL_ALLOW_REMOTE=1` to allow the report server to bind to non-loca
 
 | Type | Key Fields |
 |---|---|
-| `session_meta` | `session_name`, `session_id`, `start_time`, `hostname`, `end_time`, `command_count` |
+| `session_meta` | `session_name`, `session_id`, `start_time`, `hostname`, `end_time`, `command_count`, `parts_count`, `operator`, `platform`, `target` |
 | `command` | `seq`, `command`, `timestamp_start`, `timestamp_end`, `exit_code`, `working_directory` |
 | `asset` | `seq`, `trigger_command`, `asset_type`, `captured_path`, `original_path`, `timestamp` |
 | `note` | `text`, `timestamp`, `tags` |
