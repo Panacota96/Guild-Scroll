@@ -11,11 +11,15 @@
 
 **Terminal session recorder for CTF competitions and authorized penetration testing.**
 
+Designed for operators who want replayable evidence, structured reporting, and less manual note-taking during real lab work.
+
 Guild Scroll wraps your terminal with `script` and zsh hooks to capture every command, output, and asset into structured JSONL logs — so you can replay, search, export, and report without manual note-taking.
 
 [Installation](#installation) · [Quick Start](#quick-start) · [Deployment Modes](docs/docker/deployment-modes.md) · [Codebase Guide](#codebase-guide) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 </div>
+
+> Why it matters: Guild Scroll captures the evidence trail that usually gets lost in fast-moving CTF or pentest work, making sessions easier to replay, export, and turn into clean reports.
 
 ---
 
